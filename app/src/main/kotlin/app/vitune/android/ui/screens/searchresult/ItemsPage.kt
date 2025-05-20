@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -33,6 +34,10 @@ import app.vitune.core.ui.LocalAppearance
 import app.vitune.providers.innertube.Innertube
 import app.vitune.providers.innertube.utils.plus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -77,6 +82,7 @@ inline fun <T : Innertube.Item> ItemsPage(
     val updatedProvider by rememberUpdatedState(provider)
     val lazyListState = rememberLazyListState()
     var itemsPage by persist<Innertube.ItemsPage<T>?>(tag)
+    var searchJob by remember { mutableStateOf<Job?>(null) }
 
     val shouldLoad by remember {
         derivedStateOf {
@@ -88,15 +94,23 @@ inline fun <T : Innertube.Item> ItemsPage(
         if (!shouldLoad) return@LaunchedEffect
         val provideItems = updatedProvider ?: return@LaunchedEffect
 
-        withContext(Dispatchers.IO) {
-            provideItems(itemsPage?.continuation)
-        }?.onSuccess {
-            if (it == null) {
-                if (itemsPage == null) itemsPage = Innertube.ItemsPage(null, null)
-            } else itemsPage += it
-        }?.onFailure {
-            itemsPage = itemsPage?.copy(continuation = null)
-        }?.exceptionOrNull()?.printStackTrace()
+        // Debounce to avoid rapid cancellations
+        searchJob?.cancelAndJoin()
+        searchJob = launch(Dispatchers.IO) {
+            delay(200) // Wait 200ms to avoid canceling during rapid tab switches
+            provideItems(itemsPage?.continuation)?.let { result ->
+                result.onSuccess { newItemsPage ->
+                    if (newItemsPage == null) {
+                        if (itemsPage == null) itemsPage = Innertube.ItemsPage(null, null)
+                    } else {
+                        itemsPage = itemsPage?.plus(newItemsPage) ?: newItemsPage
+                    }
+                }.onFailure {
+                    itemsPage = itemsPage?.copy(continuation = null)
+                    it.printStackTrace()
+                }
+            }
+        }
     }
 
     Box(modifier = modifier) {

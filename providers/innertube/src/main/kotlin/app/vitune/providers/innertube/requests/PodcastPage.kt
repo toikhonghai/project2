@@ -1,100 +1,204 @@
 package app.vitune.providers.innertube.requests
 
 import app.vitune.providers.innertube.Innertube
+import app.vitune.providers.innertube.Innertube.BROWSE
 import app.vitune.providers.innertube.Innertube.PodcastEpisodeItem
+import app.vitune.providers.innertube.Innertube.PodcastItem
 import app.vitune.providers.innertube.Innertube.PodcastPage
+import app.vitune.providers.innertube.Innertube.client
+import app.vitune.providers.innertube.Innertube.logger
 import app.vitune.providers.innertube.models.BrowseResponse
+import app.vitune.providers.innertube.models.Context
 import app.vitune.providers.innertube.models.ContinuationResponse
 import app.vitune.providers.innertube.models.MusicShelfRenderer
 import app.vitune.providers.innertube.models.NavigationEndpoint
+import app.vitune.providers.innertube.models.NextResponse
+import app.vitune.providers.innertube.models.SearchResponse
+import app.vitune.providers.innertube.models.Thumbnail
 import app.vitune.providers.innertube.models.bodies.BrowseBody
 import app.vitune.providers.innertube.models.bodies.ContinuationBody
+import app.vitune.providers.innertube.models.bodies.NextBody
+import app.vitune.providers.innertube.models.bodies.SearchBody
 import app.vitune.providers.innertube.utils.toItemsPage
 import app.vitune.providers.utils.runCatchingCancellable
 import io.ktor.client.call.body
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.http.headers
+import org.slf4j.LoggerFactory
 
 /**
- * Tải thông tin trang podcast từ YouTube Music API
+ * Fetch podcast metadata and episodes from YouTube Music API
  */
-// Tải trang podcast từ YouTube Music
 suspend fun Innertube.loadPodcastPage(
     browseId: String
 ) = runCatchingCancellable {
-    // Tạo body gửi kèm (chỉ cần browseId vì context có sẵn trong client)
-    val body = BrowseBody(browseId = browseId)
+    logger.info("Fetching podcast page with browseId: $browseId")
 
-    // Gửi POST request để lấy thông tin chi tiết của podcast
+    // Lấy metadata
+    val metadata = loadPodcastMetadata(browseId)?.getOrThrow()
+
+    // Lấy playlistId và danh sách tập
+    val playlistId = getPodcastPlaylistId(browseId)
+    val episodes = playlistId?.let { loadPodcastEpisodesNext(it)?.getOrNull() } ?: metadata?.episodes
+
+    // Log kết quả
+    logger.info("Podcast Title: ${metadata?.title ?: "Unknown"}")
+    logger.info("Playlist ID: ${playlistId ?: "None"}")
+    logger.info("Episode Count: ${episodes?.items?.size ?: 0}")
+
+    PodcastPage(
+        title = metadata?.title,
+        description = metadata?.description,
+        author = metadata?.author,
+        thumbnail = metadata?.thumbnail,
+        subscriptionButton = metadata?.subscriptionButton,
+        episodes = episodes,
+        episodeCount = episodes?.items?.size ?: metadata?.episodeCount,
+        playlistId = playlistId // Thêm playlistId vào PodcastPage
+    )
+}
+
+suspend fun Innertube.loadPodcastMetadata(browseId: String) = runCatchingCancellable {
+    val body = BrowseBody(
+        browseId = browseId,
+        context = Context(
+            client = Context.Client(
+                clientName = "WEB_REMIX",
+                clientVersion = "1.20241028.01.00",
+                gl = "VN",
+                hl = "vi"
+            ),
+            user = Context.User()
+        )
+    )
+
     val response = client.post(BROWSE) {
         setBody(body)
-        mask(
-            "header.musicDetailHeaderRenderer," +
-                    "contents.sectionListRenderer.contents.musicShelfRenderer(continuations,contents.$PODCAST_EPISODE_RENDERER_MASK)"
-        )
+        body.context.apply()
     }.body<BrowseResponse>()
+    val header = response.contents?.twoColumnBrowseResultsRenderer?.tabs
+        ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
+        ?.firstOrNull()?.musicResponsiveHeaderRenderer
 
-    val header = response.header
-    val detailHeader = header?.musicDetailHeaderRenderer
-    val immersiveHeader = header?.musicImmersiveHeaderRenderer
-
-    //  Lấy tiêu đề
-    val title = detailHeader?.title?.runs?.firstOrNull()?.text
-
-    // Lấy mô tả (gộp nhiều đoạn runs thành một chuỗi)
-    val description = detailHeader?.description?.runs?.joinToString("") { it.text.orEmpty() }
-
-    // 👤 Lấy thông tin tác giả từ subtitle (dòng có navigationEndpoint)
-    val author = detailHeader?.subtitle?.runs
+    val title = header?.title?.runs?.firstOrNull()?.text
+    val description = header?.description?.description?.runs?.joinToString("") { it.text.orEmpty() }
+    val author = header?.straplineTextOne?.runs
         ?.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
         ?.let { Innertube.Info<NavigationEndpoint.Endpoint.Browse>(it) }
-
-    //  Lấy ảnh thumbnail đầu tiên
-    val thumbnail = detailHeader
-        ?.thumbnail
-        ?.musicThumbnailRenderer
-        ?.thumbnail
-        ?.thumbnails
-        ?.firstOrNull()
-
-    // Lấy nút đăng ký (hiện chỉ có subscriberCountText do API giới hạn)
-    val subscriptionButton = immersiveHeader
-        ?.subscriptionButton
-        ?.subscribeButtonRenderer
-        ?.subscriberCountText
-        ?.runs
-        ?.firstOrNull()
-        ?.text
-        ?.let { subscriberText ->
-            PodcastPage.SubscriptionButton(
-                subscribed = false,
-                subscribedButtonText = subscriberText,
-                unsubscribedButtonText = null,
-                channelId = null
-            )
-        }
-
-    // Lấy danh sách các tập podcast
-    val episodes = response
-        .contents
-        ?.sectionListRenderer
-        ?.contents
-        ?.firstOrNull()
+    val thumbnail = header?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
+        ?.maxByOrNull { (it.width ?: 0) * (it.height ?: 0) }
+    val episodes = response.contents?.twoColumnBrowseResultsRenderer?.secondaryContents
+        ?.sectionListRenderer?.contents
+        ?.firstOrNull { it.musicShelfRenderer != null }
         ?.musicShelfRenderer
         ?.toItemsPage(::parsePodcastEpisode)
+    val playlistId = getPodcastPlaylistId(browseId)
 
-    // Trả về đối tượng PodcastPage chứa toàn bộ thông tin
     PodcastPage(
         title = title,
         description = description,
         author = author,
         thumbnail = thumbnail,
-        subscriptionButton = subscriptionButton,
-        episodes = episodes
+        subscriptionButton = null,
+        episodes = episodes,
+        episodeCount = episodes?.items?.size ?: 0,
+        playlistId = playlistId // Lưu playlistId
+    )
+}
+suspend fun getPodcastPlaylistId(browseId: String): String? = runCatchingCancellable {
+    val body = BrowseBody(
+        browseId = browseId,
+        context = Context(
+            client = Context.Client(
+                clientName = "WEB_REMIX",
+                clientVersion = "1.20241028.01.00",
+                gl = "VN", // Khu vực Việt Nam
+                hl = "vi" // Ngôn ngữ tiếng Việt
+            ),
+            user = Context.User()
+        )
+    )
+
+    val response = client.post(BROWSE) {
+        setBody(body)
+        body.context.apply()
+    }.body<BrowseResponse>()
+
+    response.contents
+        ?.twoColumnBrowseResultsRenderer
+        ?.tabs
+        ?.firstOrNull()
+        ?.tabRenderer
+        ?.content
+        ?.sectionListRenderer
+        ?.contents
+        ?.firstOrNull()
+        ?.musicResponsiveHeaderRenderer
+        ?.buttons
+        ?.flatMap { button -> button.menuRenderer?.items.orEmpty() }
+        ?.firstOrNull { item -> item.toggleMenuServiceItemRenderer?.toggledServiceEndpoint?.likeEndpoint?.target?.playlistId != null }
+        ?.toggleMenuServiceItemRenderer
+        ?.toggledServiceEndpoint
+        ?.likeEndpoint
+        ?.target
+        ?.playlistId
+}?.onFailure { logger.error("Failed to retrieve playlistId for browseId $browseId: ${it.message}", it) }?.getOrNull()
+
+suspend fun Innertube.loadPodcastEpisodesNext(playlistId: String) = runCatchingCancellable {
+    val body = NextBody(
+        playlistId = playlistId,
+        context = Context(
+            client = Context.Client(
+                clientName = "WEB_REMIX",
+                clientVersion = "1.20241028.01.00",
+                gl = "VN", // Khu vực Việt Nam
+                hl = "vi" // Ngôn ngữ tiếng Việt
+            ),
+            user = Context.User()
+        )
+    )
+
+    val response = client.post(NEXT) {
+        setBody(body)
+        body.context.apply()
+    }.body<NextResponse>()
+    val playlistPanelRenderer = response.contents
+        ?.singleColumnMusicWatchNextResultsRenderer
+        ?.tabbedRenderer
+        ?.watchNextTabbedResultsRenderer
+        ?.tabs
+        ?.firstOrNull()
+        ?.tabRenderer
+        ?.content
+        ?.musicQueueRenderer
+        ?.content
+        ?.playlistPanelRenderer
+
+    val episodes = playlistPanelRenderer?.contents
+        ?.mapNotNull { it.playlistPanelVideoRenderer }
+        ?.map { renderer ->
+            PodcastEpisodeItem(
+                info = renderer.title?.runs?.firstOrNull()?.let { Innertube.Info(it.text, renderer.navigationEndpoint?.watchEndpoint) },
+                podcast = renderer.longBylineText?.runs
+                    ?.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
+                    ?.let { Innertube.Info<NavigationEndpoint.Endpoint.Browse>(it) },
+                durationText = renderer.lengthText?.runs?.firstOrNull()?.text,
+                publishedTimeText = null,
+                description = null,
+                thumbnail = renderer.thumbnail?.thumbnails?.firstOrNull()
+            )
+        }
+
+    Innertube.ItemsPage(
+        items = episodes,
+        continuation = playlistPanelRenderer?.continuations?.firstOrNull()?.nextContinuationData?.continuation
     )
 }
 
-// Hàm tải thêm tập podcast khi có continuation token
+
+// Load more podcast episodes using a continuation token
 suspend fun Innertube.loadMorePodcastEpisodes(
     continuationToken: String
 ) = runCatchingCancellable {
@@ -102,21 +206,55 @@ suspend fun Innertube.loadMorePodcastEpisodes(
 
     val response = client.post(BROWSE) {
         setBody(body)
-        mask("continuationContents.musicShelfContinuation(continuations,contents.$PODCAST_EPISODE_RENDERER_MASK)")
-    }.body<ContinuationResponse>()
+        parameter("continuation", body.continuation)
+        parameter("ctoken", body.continuation)
+    }.body<ContinuationResponse>().also { response ->
+        logger.info("Continuation response: $response")
+    }
 
-    response
-        .continuationContents
-        ?.musicShelfContinuation
-        ?.toItemsPage(::parsePodcastEpisode)
+    response.continuationContents?.musicShelfContinuation?.toItemsPage(::parsePodcastEpisode)
 }
 
-// Parse 1 tập podcast từ renderer thành PodcastEpisodeItem
-private fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpisodeItem? {
+// Fetch podcast episodes using BrowseBody
+suspend fun Innertube.loadPodcastEpisodes(
+    browseId: String
+) = runCatchingCancellable {
+    logger.info("Fetching podcast episodes with browseId: $browseId")
+    val body = BrowseBody(
+        browseId = browseId,
+        context = Context(
+            client = Context.Client(
+                clientName = "WEB_REMIX",
+                clientVersion = "1.20241028.01.00",
+                gl = "VN", // Khu vực Việt Nam
+                hl = "vi" // Ngôn ngữ tiếng Việt
+            ),
+            user = Context.User()
+        )
+    )
+
+    val response = client.post(BROWSE) {
+        setBody(body)
+    }.body<BrowseResponse>()
+
+    logger.info("Browse response for episodes: $response")
+    val contents = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
+        ?: response.contents?.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer?.contents
+
+    val musicShelfRenderer = contents?.firstOrNull { it.musicShelfRenderer != null }?.musicShelfRenderer
+
+    val episodesPage = musicShelfRenderer?.toItemsPage(::parsePodcastEpisode)
+
+    logger.debug("Fetched ${episodesPage?.items?.size ?: 0} episodes for browseId $browseId")
+    episodesPage
+}?.onFailure { error ->
+    logger.error("Error in loadPodcastEpisodes for browseId $browseId: ${error.message}", error)
+}
+
+internal fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpisodeItem? {
     val renderer = content.musicResponsiveListItemRenderer ?: return null
     val flexColumns = renderer.flexColumns
 
-    // Lấy tiêu đề và endpoint để tạo info
     val titleRun = flexColumns
         .getOrNull(0)
         ?.musicResponsiveListItemFlexColumnRenderer
@@ -124,25 +262,49 @@ private fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpi
         ?.runs
         ?.firstOrNull() ?: return null
 
-    val endpoint = titleRun.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Watch
+    // Lấy videoId từ playlistItemData hoặc browseId
+    val videoId = renderer.playlistItemData?.videoId
+        ?: titleRun.navigationEndpoint?.browseEndpoint?.browseId?.removePrefix("MPED")
         ?: return null
+
+    // Tạo Watch endpoint từ videoId
+    val endpoint = NavigationEndpoint.Endpoint.Watch(
+        videoId = videoId,
+        watchEndpointMusicSupportedConfigs = NavigationEndpoint.Endpoint.Watch.WatchEndpointMusicSupportedConfigs(
+            watchEndpointMusicConfig = NavigationEndpoint.Endpoint.Watch.WatchEndpointMusicSupportedConfigs.WatchEndpointMusicConfig(
+                musicVideoType = "MUSIC_VIDEO_TYPE_PODCAST_EPISODE"
+            )
+        )
+    )
+
+    // Kiểm tra pageType để đảm bảo là podcast episode
+    val isPodcastEpisode = titleRun.navigationEndpoint?.browseEndpoint
+        ?.browseEndpointContextSupportedConfigs
+        ?.browseEndpointContextMusicConfig
+        ?.pageType == "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+    if (!isPodcastEpisode) {
+        logger.debug("Not a podcast episode: ${titleRun.text}")
+        return null
+    }
 
     val info = Innertube.Info(titleRun.text, endpoint)
 
-    // Lấy thông tin podcast gốc
     val podcastRun = flexColumns
         .getOrNull(1)
         ?.musicResponsiveListItemFlexColumnRenderer
         ?.text
         ?.runs
 
+    // Tìm podcast với browseEndpoint
     val podcast = podcastRun
         ?.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
         ?.let { Innertube.Info<NavigationEndpoint.Endpoint.Browse>(it) }
 
-    val publishedTimeText = podcastRun?.lastOrNull()?.text
+    // Lấy publishedTimeText từ runs đầu tiên hoặc cuối cùng
+    val publishedTimeText = podcastRun
+        ?.firstOrNull { it.text?.matches("\\d{1,2} [A-Za-z]+ \\d{4}|\\d+ (days?|hours?) ago".toRegex()) == true }
+        ?.text ?: podcastRun?.lastOrNull()?.text
 
-    // ️ Thời lượng tập
     val durationText = renderer.fixedColumns
         ?.firstOrNull()
         ?.musicResponsiveListItemFlexColumnRenderer
@@ -151,7 +313,6 @@ private fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpi
         ?.firstOrNull()
         ?.text
 
-    // Mô tả
     val description = flexColumns
         .getOrNull(2)
         ?.musicResponsiveListItemFlexColumnRenderer
@@ -159,12 +320,18 @@ private fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpi
         ?.runs
         ?.joinToString("") { it.text.orEmpty() }
 
-    // Thumbnail tập podcast
     val thumbnail = renderer.thumbnail
         ?.musicThumbnailRenderer
         ?.thumbnail
         ?.thumbnails
         ?.firstOrNull()
+        ?.let {
+            Thumbnail(
+                url = it.url ?: "",
+                height = it.height,
+                width = it.width
+            )
+        }
 
     return PodcastEpisodeItem(
         info = info,
@@ -173,13 +340,7 @@ private fun parsePodcastEpisode(content: MusicShelfRenderer.Content): PodcastEpi
         publishedTimeText = publishedTimeText,
         description = description,
         thumbnail = thumbnail
-    )
+    ).also {
+        logger.debug("Parsed podcast episode: ${it.info?.name}, videoId: $videoId")
+    }
 }
-
-//// Chuyển MusicShelfRenderer thành danh sách PodcastEpisodeItem + continuation
-//private fun <T : Innertube.Item> MusicShelfRenderer?.toItemsPage(
-//    mapper: (MusicShelfRenderer.Content) -> T?
-//) = Innertube.ItemsPage(
-//    items = this?.contents?.mapNotNull(mapper),
-//    continuation = this?.continuations?.firstOrNull()?.nextContinuationData?.continuation
-//)

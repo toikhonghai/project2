@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import androidx.media3.common.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.vitune.android.Database
@@ -18,10 +19,11 @@ import kotlinx.coroutines.flow.first
 
 class PodcastSyncWorker(context: Context, params: WorkerParameters): CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = runCatchingCancellable {
+        Log.d("PodcastSyncWorker", "Starting podcast sync")
         val podcasts = Database.getSubscribedPodcasts().first()
         podcasts.forEach { podcast ->
             Innertube.loadPodcastPage(podcast.browseId)?.onSuccess { page ->
-                val episodes = page.episodes?.items?.map { PodcastEpisodeEntity.fromPodcastEpisodeItem(it, podcast.browseId) }
+                val episodes = page?.episodes?.items?.map { PodcastEpisodeEntity.fromPodcastEpisodeItem(it, podcast.browseId) }
                 episodes?.let { Database.insertEpisodes(it) }
                 Database.updatePodcast(podcast.copy(
                     episodeCount = episodes?.size,

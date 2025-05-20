@@ -40,6 +40,7 @@ import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -73,12 +74,16 @@ import app.vitune.android.service.downloadState
 import app.vitune.android.ui.components.BottomSheetMenu
 import app.vitune.android.ui.components.rememberBottomSheetState
 import app.vitune.android.ui.components.themed.LinearProgressIndicator
+import app.vitune.android.ui.screens.GlobalRoutes
+import app.vitune.android.ui.screens.account.LoginScreen
 import app.vitune.android.ui.screens.albumRoute
 import app.vitune.android.ui.screens.artistRoute
 import app.vitune.android.ui.screens.home.HomeScreen
+import app.vitune.android.ui.screens.loginRoute
 import app.vitune.android.ui.screens.player.Player
 import app.vitune.android.ui.screens.player.Thumbnail
 import app.vitune.android.ui.screens.playlistRoute
+import app.vitune.android.ui.screens.registerRoute
 import app.vitune.android.ui.screens.searchResultRoute
 import app.vitune.android.ui.screens.settingsRoute
 import app.vitune.android.utils.DisposableListener
@@ -98,6 +103,7 @@ import app.vitune.android.utils.toast
 import app.vitune.compose.persist.LocalPersistMap
 import app.vitune.compose.persist.PersistMap
 import app.vitune.compose.preferences.PreferencesHolder
+import app.vitune.compose.routing.RouteHandler
 import app.vitune.core.ui.Darkness
 import app.vitune.core.ui.Dimensions
 import app.vitune.core.ui.LocalAppearance
@@ -123,6 +129,8 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.util.DebugLogger
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import com.kieronquinn.monetcompat.BuildConfig
 import com.kieronquinn.monetcompat.core.MonetActivityAccessException
 import com.kieronquinn.monetcompat.core.MonetCompat
@@ -166,6 +174,8 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     private var _monet: MonetCompat? by mutableStateOf(null)
     private val monet get() = _monet ?: throw MonetActivityAccessException()
 
+    var forceRefresh: Boolean by mutableStateOf(false)
+
     override fun onStart() {
         super.onStart()
         bindService(intent<PlayerService>(), serviceConnection, Context.BIND_AUTO_CREATE)
@@ -176,7 +186,7 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        MonetCompat.setup(this)
+        // Không gọi MonetCompat.setup ở đây để tránh đăng ký BroadcastReceiver
         _monet = MonetCompat.getInstance()
         monet.setDefaultPalette()
         monet.addMonetColorsChangedListener(
@@ -190,6 +200,17 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
 
         intent?.let { handleIntent(it) }
         addOnNewIntentListener(::handleIntent)
+
+        FirebaseAuth.getInstance().addAuthStateListener { auth ->
+            if (auth.currentUser == null) {
+                // Làm sạch PlayerService khi đăng xuất
+                vm.binder?.player?.stop()
+                vm.binder?.player?.clearMediaItems()
+                vm.binder = null
+                stopService(Intent(this, PlayerService::class.java))
+            }
+            setContent()
+        }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -235,6 +256,29 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     @OptIn(ExperimentalLayoutApi::class)
     fun setContent() = setContent {
         val windowInsets = WindowInsets.systemBars
+        var isLoggedIn by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser != null) }
+
+        if (forceRefresh) {
+            Log.d("MainActivity", "Force refresh triggered, recreating activity")
+            forceRefresh = false
+            recreate()
+            return@setContent
+        }
+
+        DisposableEffect(Unit) {
+            val authListener = FirebaseAuth.AuthStateListener { auth ->
+                isLoggedIn = auth.currentUser != null
+                Log.d("MainActivity", "Auth state changed, isLoggedIn: $isLoggedIn")
+                if (!isLoggedIn) {
+                    vm.binder?.player?.stop()
+                    vm.binder?.player?.clearMediaItems()
+                }
+            }
+            FirebaseAuth.getInstance().addAuthStateListener(authListener)
+            onDispose {
+                FirebaseAuth.getInstance().removeAuthStateListener(authListener)
+            }
+        }
 
         AppWrapper(
             modifier = Modifier.padding(
@@ -304,38 +348,45 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                     LocalPlayerAwareWindowInsets provides playerAwareWindowInsets
                 ) {
                     val isDownloading by downloadState.collectAsState()
+                    RouteHandler {
+                        GlobalRoutes()
 
-                    Box {
-                        HomeScreen()
-                    }
+                        if (!isLoggedIn) {
+                            loginRoute()
+                        } else {
+                            Box {
+                                HomeScreen()
 
-                    AnimatedVisibility(
-                        visible = isDownloading,
-                        modifier = Modifier.padding(playerAwareWindowInsets.asPaddingValues())
-                    ) {
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(Alignment.TopCenter)
-                        )
-                    }
+                                AnimatedVisibility(
+                                    visible = isDownloading,
+                                    modifier = Modifier.padding(playerAwareWindowInsets.asPaddingValues())
+                                ) {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .align(Alignment.TopCenter)
+                                    )
+                                }
 
-                    CompositionLocalProvider(
-                        LocalAppearance provides LocalAppearance.current.let {
-                            if (it.colorPalette.isDark && AppearancePreferences.darkness == Darkness.AMOLED) {
-                                it.copy(colorPalette = it.colorPalette.amoled())
-                            } else it
+                                CompositionLocalProvider(
+                                    LocalAppearance provides LocalAppearance.current.let {
+                                        if (it.colorPalette.isDark && AppearancePreferences.darkness == Darkness.AMOLED) {
+                                            it.copy(colorPalette = it.colorPalette.amoled())
+                                        } else it
+                                    }
+                                ) {
+                                    Player(
+                                        layoutState = playerBottomSheetState,
+                                        modifier = Modifier.align(Alignment.BottomCenter)
+                                    )
+                                }
+
+                                BottomSheetMenu(
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                )
+                            }
                         }
-                    ) {
-                        Player(
-                            layoutState = playerBottomSheetState,
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                        )
                     }
-
-                    BottomSheetMenu(
-                        modifier = Modifier.align(Alignment.BottomCenter)
-                    )
                 }
             }
 
@@ -503,9 +554,10 @@ fun handleUrl(
     }
 }
 
-val LocalPlayerServiceBinder = staticCompositionLocalOf<PlayerService.Binder?> { null } // để cung cấp thông tin về dịch vụ phát nhạc
+val LocalPlayerServiceBinder =
+    staticCompositionLocalOf<PlayerService.Binder?> { null }
 val LocalPlayerAwareWindowInsets =
-    compositionLocalOf<WindowInsets> { error("No player insets provided") } // để cung cấp thông tin về kích thước và vị trí của các thành phần giao diện người dùng trong ứng dụng
+    compositionLocalOf<WindowInsets> { error("No player insets provided") }
 val LocalCredentialManager = staticCompositionLocalOf { Dependencies.credentialManager }
 
 class MainApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider {
@@ -522,8 +574,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
         )
 
         MonetCompat.debugLog = BuildConfig.DEBUG
+        // Khởi tạo MonetCompat trong Application
+        MonetCompat.setup(this)
         super.onCreate()
 
+        FirebaseApp.initializeApp(this)
+        Log.d("MainApplication", "Firebase initialized: ${FirebaseApp.getInstance() != null}")
         Dependencies.init(this)
         MonetCompat.enablePaletteCompat()
         ServiceNotifications.createAll()
@@ -565,4 +621,7 @@ object Dependencies {
     }
 }
 
-open class GlobalPreferencesHolder : PreferencesHolder(Dependencies.application, "preferences") // để lưu trữ các tùy chọn của người dùng trong ứng dụng
+open class GlobalPreferencesHolder : PreferencesHolder(
+    Dependencies.application,
+    "preferences"
+)

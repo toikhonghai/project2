@@ -2,8 +2,10 @@ package app.vitune.android.models
 
 import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -12,7 +14,9 @@ import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import app.vitune.android.Converters
+import app.vitune.android.Database
 import app.vitune.providers.innertube.Innertube
+import kotlinx.coroutines.runBlocking
 
 @Entity(
     tableName = "podcast_episodes",
@@ -52,7 +56,7 @@ data class PodcastEpisodeEntity(
     val lastPlayed: Long? = null,
 
     val customMetadata: Map<String, String>? = null
-){
+) {
     companion object {
         fun fromPodcastEpisodeItem(episode: Innertube.PodcastEpisodeItem, podcastId: String): PodcastEpisodeEntity {
             return PodcastEpisodeEntity(
@@ -66,25 +70,35 @@ data class PodcastEpisodeEntity(
             )
         }
     }
-    fun toMediaItem(): MediaItem {
+
+    @OptIn(UnstableApi::class)
+    fun asMediaItem(): MediaItem {
+        val podcast = runBlocking { Database.getPodcastById(podcastId) }
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
-            .setArtist(podcastId)
+            .setArtist(podcast?.title ?: podcastId)
             .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
-            .setExtras(Bundle().apply {
-                putString("durationText", durationText)
-                putBoolean("isPodcast", true)
-            })
+            .setExtras(
+                Bundle().apply {
+                    putString("durationText", durationText)
+                    putBoolean("isPodcast", true)
+                    putString("podcastId", podcastId)
+                    putBoolean("isDownloaded", isDownloaded)
+                }
+            )
             .build()
+
         val uri = if (isDownloaded && downloadPath != null) {
             Uri.parse(downloadPath)
         } else {
-            Uri.parse("https://youtubei.googleapis.com/youtubei/v1/player?videoId=$videoId")
+            Uri.parse("https://www.youtube.com/watch?v=$videoId")
         }
+
         return MediaItem.Builder()
             .setMediaId(videoId)
             .setUri(uri)
             .setMediaMetadata(metadata)
+            .setCustomCacheKey(videoId)
             .build()
     }
 }

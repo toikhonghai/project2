@@ -131,8 +131,7 @@ fun HomeSongs(
     val keyboardController = LocalSoftwareKeyboardController.current
 
     var filter: String? by rememberSaveable { mutableStateOf(null) } // Bộ lọc tên bài hát
-    var items by persistList<Song>("home/songs") // Lưu danh sách bài hát giữa các recomposition
-
+    var items by persistList<Song>("home/songs/items")
     // Lọc bài hát theo `filter`
     val filteredItems by remember {
         derivedStateOf {

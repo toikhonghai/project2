@@ -73,6 +73,7 @@ import app.vitune.android.ui.components.LocalMenuState
 import app.vitune.android.ui.components.rememberBottomSheetState
 import app.vitune.android.ui.components.themed.BaseMediaItemMenu
 import app.vitune.android.ui.components.themed.IconButton
+import app.vitune.android.ui.components.themed.PodcastEpisodeMenu
 import app.vitune.android.ui.components.themed.SecondaryTextButton
 import app.vitune.android.ui.components.themed.SliderDialog
 import app.vitune.android.ui.components.themed.SliderDialogBody
@@ -680,41 +681,36 @@ fun Player(
 
 @Composable
 @OptIn(UnstableApi::class)
-// hiển thị các lựa chọn như equalizer, tốc độ, và tăng âm lượng tùy điều kiện.
 private fun PlayerMenu(
-    binder: PlayerService.Binder, // Kết nối với player service
-    mediaItem: MediaItem, // Bài hát hoặc media hiện tại
-    onDismiss: () -> Unit, // Callback khi menu đóng
-    onShowSpeedDialog: (() -> Unit)? = null, // Optional: hiện dialog chỉnh tốc độ phát
-    onShowNormalizationDialog: (() -> Unit)? = null // Optional: hiện dialog tăng giảm âm lượng
+    binder: PlayerService.Binder,
+    mediaItem: MediaItem,
+    onDismiss: () -> Unit,
+    onShowSpeedDialog: (() -> Unit)? = null,
+    onShowNormalizationDialog: (() -> Unit)? = null
 ) {
-    // Lấy launcher để mở trình chỉnh Equalizer với session ID của player
+    val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
     val launchEqualizer by rememberEqualizerLauncher(audioSessionId = { binder.player.audioSessionId })
 
-    // Hiển thị menu mặc định cho media item
-    BaseMediaItemMenu(
-        mediaItem = mediaItem, // Truyền bài hát hiện tại
-
-        // Bắt đầu phát "radio mode" từ media hiện tại
-        onStartRadio = {
-            binder.stopRadio() // Dừng radio hiện tại (nếu có)
-            binder.player.seamlessPlay(mediaItem) // Phát lại media mượt mà
-            binder.setupRadio(NavigationEndpoint.Endpoint.Watch(videoId = mediaItem.mediaId)) // Tạo danh sách radio
-        },
-
-        // Mở trình chỉnh equalizer
-        onGoToEqualizer = launchEqualizer,
-
-        // Tạm thời không xử lý sleep timer
-        onShowSleepTimer = {},
-
-        // Khi đóng menu
-        onDismiss = onDismiss,
-
-        // Truyền các callback tùy chọn để mở speed & normalization dialog
-        onShowSpeedDialog = onShowSpeedDialog,
-        onShowNormalizationDialog = onShowNormalizationDialog
-    )
+    if (isPodcast) {
+        PodcastEpisodeMenu(
+            onDismiss = onDismiss,
+            mediaItem = mediaItem
+        )
+    } else {
+        BaseMediaItemMenu(
+            mediaItem = mediaItem,
+            onStartRadio = {
+                binder.stopRadio()
+                binder.player.seamlessPlay(mediaItem)
+                binder.setupRadio(NavigationEndpoint.Endpoint.Watch(videoId = mediaItem.mediaId))
+            },
+            onGoToEqualizer = launchEqualizer,
+            onShowSleepTimer = {},
+            onDismiss = onDismiss,
+            onShowSpeedDialog = onShowSpeedDialog,
+            onShowNormalizationDialog = onShowNormalizationDialog
+        )
+    }
 }
 
 // Hàm đóng menu: dừng radio và xóa tất cả media đang phát

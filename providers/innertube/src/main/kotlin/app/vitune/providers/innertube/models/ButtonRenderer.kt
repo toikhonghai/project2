@@ -8,6 +8,12 @@ data class ButtonRenderer( //  đại diện cho một nút bấm trên giao di�
 )
 
 @Serializable
-data class SubscribeButtonRenderer( // đại diện cho nút "Đăng ký kênh" trên YouTube Music.
-    val subscriberCountText: Runs?
+data class SubscribeButtonRenderer(
+    val subscribed: Boolean? = null,
+    val subscribedButtonText: Runs? = null,
+    val unsubscribedButtonText: Runs? = null,
+    val channelId: String? = null,
+    val subscriberCountText: Runs? = null,
+    val subscribedText: Runs? = null,
+    val unsubscribedText: Runs? = null
 )

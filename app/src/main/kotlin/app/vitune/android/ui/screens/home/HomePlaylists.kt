@@ -185,8 +185,6 @@ fun HomePlaylists(
                 }
             }
 
-            // TODO: clean up (also in BuiltInPlaylistScreen): icon etc. could live in BuiltInPlaylist (cleans up duplicate code mess)
-
             if (BuiltInPlaylist.Favorites in builtInPlaylists) item(key = "favorites") {
                 PlaylistItem(
                     icon = R.drawable.heart,

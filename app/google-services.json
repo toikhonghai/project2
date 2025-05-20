@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "27278157922",
+    "project_id": "vitune-b6216",
+    "storage_bucket": "vitune-b6216.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:27278157922:android:3c86c248c3ef3c7fa2093b",
+        "android_client_info": {
+          "package_name": "app.vitune.android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFASD4VhPWqB4iFTQsaiIOeI9AMkiV_YY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

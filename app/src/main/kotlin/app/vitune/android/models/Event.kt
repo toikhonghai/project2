@@ -22,5 +22,6 @@ data class Event(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(index = true) val songId: String,
     val timestamp: Long, // thời gian xảy ra sự kiện
-    val playTime: Long // thời gian phát nhạc (tính bằng giây) tại thời điểm sự kiện xảy ra
+    val playTime: Long, // thời gian phát nhạc (tính bằng giây) tại thời điểm sự kiện xảy ra
+    val entityType: String
 )

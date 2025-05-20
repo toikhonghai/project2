@@ -107,8 +107,7 @@ fun QuickPicks(
     var trending by persist<Song?>("home/trending")
 
     // Kết quả dữ liệu liên quan (albums, playlists, nghệ sĩ, bài hát...) dùng cho phần Quick Picks
-    var relatedPageResult by persist<Result<Innertube.RelatedPage?>?>(tag = "home/relatedPageResult")
-
+    var relatedPageResult by persist<Result<Innertube.RelatedPage?>?>(tag = "home/quickPicks/relatedPageResult")
     // Ghi đè cache nếu người dùng cho phép cache quick picks
     LaunchedEffect(relatedPageResult, DataPreferences.shouldCacheQuickPicks) {
         if (DataPreferences.shouldCacheQuickPicks)
@@ -207,10 +206,10 @@ fun QuickPicks(
                 )
         ) {
             // Phần header với tiêu đề "Quick Picks"
-            Header(
-                title = stringResource(R.string.quick_picks), // Lấy chuỗi từ resource
-                modifier = Modifier.padding(endPaddingValues) // Padding bên phải để tránh va chạm layout
-            )
+//            Header(
+//                title = stringResource(R.string.quick_picks), // Lấy chuỗi từ resource
+//                modifier = Modifier.padding(endPaddingValues) // Padding bên phải để tránh va chạm layout
+//            )
 
             // Nếu dữ liệu liên quan đã được load thành công
             relatedPageResult?.getOrNull()?.let { related ->

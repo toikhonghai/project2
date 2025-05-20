@@ -11,6 +11,7 @@ plugins {
     alias(libs.plugins.android.lint) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.detekt)
+    id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 val clean by tasks.registering(Delete::class) {

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.vitune.android.Database
 import app.vitune.android.models.PlaylistPreview
+import app.vitune.android.models.PodcastPlaylistPreview
 import app.vitune.android.ui.components.themed.TextPlaceholder
 import app.vitune.android.utils.center
 import app.vitune.android.utils.color
@@ -188,7 +189,64 @@ fun PlaylistItem(
     modifier = modifier,
     alternative = alternative
 )
+@Composable
+fun PlaylistItem(
+    playlist: PodcastPlaylistPreview,
+    thumbnailSize: Dp,
+    modifier: Modifier = Modifier,
+    alternative: Boolean = false
+) {
+    val thumbnailSizePx = thumbnailSize.px
 
+    val thumbnails by remember {
+        playlist.thumbnail?.let {
+            flowOf(listOf(it))
+        } ?: Database
+            .podcastPlaylistThumbnailUrls(playlist.id)
+            .distinctUntilChanged()
+            .map { urls ->
+                urls.map { it.thumbnail(thumbnailSizePx / 2) }
+            }
+    }.collectAsState(
+        initial = emptyList(),
+        context = Dispatchers.IO
+    )
+
+    PlaylistItem(
+        thumbnailContent = {
+            if (thumbnails.toSet().size == 1)
+                AsyncImage(
+                    model = thumbnails.first().thumbnail(thumbnailSizePx),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = it
+                )
+            else Box(modifier = it.fillMaxSize()) {
+                listOf(
+                    Alignment.TopStart,
+                    Alignment.TopEnd,
+                    Alignment.BottomStart,
+                    Alignment.BottomEnd
+                ).forEachIndexed { index, alignment ->
+                    AsyncImage(
+                        model = thumbnails.getOrNull(index),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .align(alignment)
+                            .fillMaxSize(.5f)
+                    )
+                }
+            }
+        },
+        songCount = playlist.episodeCount,
+        name = playlist.name,
+        channelName = null,
+        thumbnailSize = thumbnailSize,
+        modifier = modifier,
+        alternative = alternative
+    )
+}
 @Composable
 fun PlaylistItem(
     thumbnailContent: @Composable BoxScope.(modifier: Modifier) -> Unit, // Composable hiển thị thumbnail (ảnh bìa playlist)

@@ -88,6 +88,7 @@ fun OnlineSearch(
     onViewPlaylist: (String) -> Unit, // Hàm mở playlist nếu người dùng nhập link
     decorationBox: @Composable (@Composable () -> Unit) -> Unit, // Box để hiển thị placeholder trong TextField
     focused: Boolean, // Xác định TextField có đang focus hay không
+    isPodcastSearch: Boolean = false,
     modifier: Modifier = Modifier // Modifier cho Box chứa toàn bộ UI
 ) = Box(modifier = modifier) {
     val (colorPalette, typography) = LocalAppearance.current // Lấy theme màu và font chữ từ context dùng chung

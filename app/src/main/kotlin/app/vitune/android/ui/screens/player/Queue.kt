@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,6 +64,9 @@ import androidx.media3.common.Timeline
 import app.vitune.android.Database
 import app.vitune.android.R
 import app.vitune.android.models.Playlist
+import app.vitune.android.models.PodcastEpisodeEntity
+import app.vitune.android.models.PodcastPlaylist
+import app.vitune.android.models.PodcastEpisodePlaylistMap
 import app.vitune.android.models.SongPlaylistMap
 import app.vitune.android.preferences.AppearancePreferences
 import app.vitune.android.preferences.PlayerPreferences
@@ -113,115 +117,98 @@ import app.vitune.providers.innertube.requests.nextPage
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Queue(
-    layoutState: BottomSheetState, // Trạng thái của BottomSheet (mở/đóng, kéo lên/xuống)
-    binder: PlayerService.Binder, // Binder để truy cập player trong service
-    beforeContent: @Composable RowScope.() -> Unit, // Composable hiển thị trước danh sách nhạc
-    afterContent: @Composable RowScope.() -> Unit,  // Composable hiển thị sau danh sách nhạc
-    modifier: Modifier = Modifier, // Modifier để tùy biến bố cục
+    layoutState: BottomSheetState,
+    binder: PlayerService.Binder,
+    beforeContent: @Composable RowScope.() -> Unit,
+    afterContent: @Composable RowScope.() -> Unit,
+    modifier: Modifier = Modifier,
     shape: RoundedCornerShape = RoundedCornerShape(
         topStart = 12.dp,
         topEnd = 12.dp
-    ), // Bo góc trên của giao diện BottomSheet
+    ),
     scrollConnection: NestedScrollConnection = remember(layoutState::preUpPostDownNestedScrollConnection),
-    // Scroll connection để đồng bộ cuộn giữa các phần tử
-    windowInsets: WindowInsets = WindowInsets.systemBars // Đệm để tránh overlap với thanh điều hướng/hệ thống
+    windowInsets: WindowInsets = WindowInsets.systemBars
 ) {
-    // Lấy màu sắc và kiểu chữ từ giao diện hiện tại
     val (colorPalette, typography, _, thumbnailShape) = LocalAppearance.current
     val menuState = LocalMenuState.current
-
-    // Padding ngang và dưới để giao diện không bị che khuất bởi system bar
     val horizontalBottomPaddingValues = windowInsets
         .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
         .asPaddingValues()
 
-    // Biến lưu danh sách đề xuất nhạc, được lưu lại trong bộ nhớ với tag
     var suggestions by persist<Result<List<MediaItem>?>?>(tag = "queue/suggestions")
-
-    // Chỉ số bài hát hiện tại đang phát, -1 nếu danh sách trống
     var mediaItemIndex by remember {
         mutableIntStateOf(if (binder.player.mediaItemCount == 0) -1 else binder.player.currentMediaItemIndex)
     }
-
-    // Timeline hiện tại của player (chứa danh sách các bài nhạc)
     var windows by remember { mutableStateOf(binder.player.currentTimeline.windows) }
-
-    // Trạng thái player có đang phát hay không
     var shouldBePlaying by remember { mutableStateOf(binder.player.shouldBePlaying) }
-
-    // Trạng thái scroll của danh sách nhạc
     val lazyListState = rememberLazyListState()
-
-    // Trạng thái dùng để reorder danh sách nhạc bằng thao tác kéo thả
     val reorderingState = rememberReorderingState(
         lazyListState = lazyListState,
-        key = windows, // Dựa vào danh sách `windows` làm key để reorder
-        onDragEnd = binder.player::moveMediaItem // Gọi hàm di chuyển bài hát trong player khi drag kết thúc
+        key = windows,
+        onDragEnd = binder.player::moveMediaItem
     )
 
-    // Danh sách đề xuất nhạc hiển thị, lọc ra những bài chưa có trong danh sách hiện tại
+    // Xác định xem queue hiện tại là music hay podcast
+    val isPodcastQueue by remember {
+        derivedStateOf {
+            windows.any { it.mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true }
+        }
+    }
+
+    // Lọc suggestion dựa trên loại queue
     val visibleSuggestions by remember {
         derivedStateOf {
             suggestions
                 ?.getOrNull()
                 .orEmpty()
-                .filter { suggestionsItem ->
-                    windows.none { window -> window.mediaItem.mediaId == suggestionsItem.mediaId }
+                .filter { suggestion ->
+                    windows.none { window -> window.mediaItem.mediaId == suggestion.mediaId } &&
+                            (isPodcastQueue == suggestion.mediaMetadata.extras?.getBoolean("isPodcast"))
                 }
         }
     }
 
-    // Kiểm tra xem có cần load thêm gợi ý không, khi item loading xuất hiện trong vùng hiển thị
     val shouldLoadSuggestions by remember {
         derivedStateOf {
             lazyListState.layoutInfo.visibleItemsInfo.any { it.key == "loading" }
         }
     }
 
-    // Khi mediaItemIndex hoặc shouldLoadSuggestions thay đổi, block này sẽ được kích hoạt lại
     LaunchedEffect(mediaItemIndex, shouldLoadSuggestions) {
-        // Nếu cần load đề xuất...
-        if (shouldLoadSuggestions) withContext(Dispatchers.IO) {
-            // Gọi API từ luồng IO để tránh block UI
-            suggestions = runCatching {
-                // Gửi request đến API Innertube (giả định là API của YouTube hoặc dịch vụ nhạc khác)
-                Innertube.nextPage(
-                    NextBody(videoId = windows[mediaItemIndex].mediaItem.mediaId)
-                )?.mapCatching { page ->
-                    // Lấy danh sách item đề xuất từ trang trả về và chuyển thành MediaItem
-                    page.itemsPage?.items?.map { it.asMediaItem }
-                }
+        if (shouldLoadSuggestions && windows.isNotEmpty()) withContext(Dispatchers.IO) {
+            val currentMediaItem = windows[mediaItemIndex].mediaItem
+            val isPodcast = currentMediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
+            suggestions = if (isPodcast) {
+                Result.success(emptyList()) // Không load suggestion cho podcast
+            } else {
+                runCatching {
+                    Innertube.nextPage(
+                        NextBody(videoId = currentMediaItem.mediaId)
+                    )?.getOrNull()?.itemsPage?.items?.map { it.asMediaItem } ?: emptyList()
+                }.also { it.exceptionOrNull()?.printStackTrace() }
             }
-                // Ghi log nếu có lỗi
-                .also { it.exceptionOrNull()?.printStackTrace() }
-                // Lấy giá trị hoặc null nếu thất bại
-                .getOrNull()
         }
     }
 
-// Khi chỉ số mediaItem thay đổi, reset lại suggestions về null (dọn dẹp dữ liệu cũ)
     LaunchedEffect(mediaItemIndex) {
         suggestions = null
     }
 
-// Đăng ký một listener lắng nghe sự kiện của Player
     binder.player.DisposableListener {
         object : Player.Listener {
-
-            // Khi chuyển bài hát
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItemIndex =
                     if (binder.player.mediaItemCount == 0) -1
                     else binder.player.currentMediaItemIndex
             }
 
-            // Khi timeline (danh sách bài hát) thay đổi
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 windows = timeline.windows
                 mediaItemIndex =
@@ -229,83 +216,73 @@ fun Queue(
                     else binder.player.currentMediaItemIndex
             }
 
-            // Khi trạng thái "play khi sẵn sàng" thay đổi
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 shouldBePlaying = binder.player.shouldBePlaying
             }
 
-            // Khi trạng thái phát nhạc thay đổi (đang phát, tạm dừng, đã dừng, đang buffering, v.v.)
             override fun onPlaybackStateChanged(playbackState: Int) {
                 shouldBePlaying = binder.player.shouldBePlaying
             }
         }
     }
 
-    // Tạo BottomSheet chứa danh sách hàng đợi
     BottomSheet(
-        state = layoutState, // Trạng thái mở/đóng của BottomSheet
-        modifier = modifier.fillMaxSize(), // Chiếm toàn bộ kích thước
-        collapsedContent = { innerModifier -> // Phần hiển thị khi BottomSheet bị thu gọn
+        state = layoutState,
+        modifier = modifier.fillMaxSize(),
+        collapsedContent = { innerModifier ->
             Row(
                 modifier = Modifier
-                    .clip(shape) // Bo góc theo shape truyền vào
-                    .background(colorPalette.background2) // Màu nền của phần thu gọn
-                    .fillMaxSize() // Chiếm hết không gian
-                    .then(innerModifier) // Kết hợp modifier từ hệ thống
-                    .padding(horizontalBottomPaddingValues), // Padding ngang và dưới (tránh overlap system bar)
-                verticalAlignment = Alignment.CenterVertically, // Căn giữa theo chiều dọc
-                horizontalArrangement = Arrangement.spacedBy(16.dp) // Khoảng cách giữa các phần tử
+                    .clip(shape)
+                    .background(colorPalette.background2)
+                    .fillMaxSize()
+                    .then(innerModifier)
+                    .padding(horizontalBottomPaddingValues),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Spacer(modifier = Modifier.width(4.dp)) // Khoảng trắng đầu dòng
-                beforeContent() // Composable do người dùng truyền vào (hiển thị bên trái)
-                Spacer(modifier = Modifier.weight(1f)) // Đẩy các phần tử về hai bên
-
-                // Icon danh sách phát (playlist)
+                Spacer(modifier = Modifier.width(4.dp))
+                beforeContent()
+                Spacer(modifier = Modifier.weight(1f))
                 Image(
                     painter = painterResource(R.drawable.playlist),
                     contentDescription = null,
-                    colorFilter = ColorFilter.tint(colorPalette.text), // Tô màu cho icon theo màu chữ hiện tại
+                    colorFilter = ColorFilter.tint(colorPalette.text),
                     modifier = Modifier.size(18.dp)
                 )
-
-                Spacer(modifier = Modifier.weight(1f)) // Khoảng trắng để cân đối
-                afterContent() // Composable người dùng truyền vào (bên phải)
-                Spacer(modifier = Modifier.width(4.dp)) // Khoảng trắng cuối dòng
+                Spacer(modifier = Modifier.weight(1f))
+                afterContent()
+                Spacer(modifier = Modifier.width(4.dp))
             }
         }
     ) {
-        // Hiệu ứng chuyển động cho cột nhạc (khi reorder sẽ dừng hoạt ảnh)
         val musicBarsTransition = updateTransition(
             targetState = if (reorderingState.isDragging) -1L else mediaItemIndex,
-            label = "" // Không đặt label cho transition
+            label = ""
         )
 
-        // Khi composable được khởi tạo, tự động scroll tới bài hát đang phát
         LaunchedEffect(Unit) {
-            lazyListState.scrollToItem(mediaItemIndex.coerceAtLeast(0)) // Đảm bảo chỉ số >= 0
+            lazyListState.scrollToItem(mediaItemIndex.coerceAtLeast(0))
         }
 
         Column {
             Box(
                 modifier = Modifier
-                    .clip(shape) // Bo góc
-                    .background(colorPalette.background1) // Màu nền chính
-                    .weight(1f) // Chiếm hết phần còn lại trong Column
+                    .clip(shape)
+                    .background(colorPalette.background1)
+                    .weight(1f)
             ) {
-                // Sử dụng LookaheadScope cho khả năng đo trước layout (dùng trong animation)
                 LookaheadScope {
                     LazyColumn(
-                        state = lazyListState, // Trạng thái scroll
+                        state = lazyListState,
                         contentPadding = windowInsets
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top)
-                            .asPaddingValues(), // Padding tránh thanh trạng thái/hệ thống
+                            .asPaddingValues(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.nestedScroll(scrollConnection) // Kéo liên kết với BottomSheet
+                        modifier = Modifier.nestedScroll(scrollConnection)
                     ) {
-                        // Vòng lặp danh sách các bài hát trong hàng đợi
                         itemsIndexed(
                             items = windows,
-                            key = { _, window -> window.uid.hashCode() }, // Key duy nhất
+                            key = { _, window -> window.uid.hashCode() },
                             contentType = { _, _ -> ContentType.Window }
                         ) { i, window ->
                             val isPlayingThisMediaItem = mediaItemIndex == window.firstPeriodIndex
@@ -313,11 +290,9 @@ fun Queue(
                             SongItem(
                                 song = window.mediaItem,
                                 thumbnailSize = Dimensions.thumbnails.song,
-
-                                // Overlay ảnh nhỏ khi đang phát (nút play hoặc animation MusicBars)
                                 onThumbnailContent = {
                                     musicBarsTransition.AnimatedVisibility(
-                                        visible = { it == window.firstPeriodIndex }, // Chỉ hiện nếu là bài đang phát
+                                        visible = { it == window.firstPeriodIndex },
                                         enter = fadeIn(tween(800)),
                                         exit = fadeOut(tween(800))
                                     ) {
@@ -342,16 +317,12 @@ fun Queue(
                                         }
                                     }
                                 },
-
-                                // Handle để kéo reorder
                                 trailingContent = {
                                     ReorderHandle(
                                         reorderingState = reorderingState,
                                         index = i
                                     )
                                 },
-
-                                // Các hành vi khi click hoặc long click
                                 modifier = Modifier
                                     .combinedClickable(
                                         onLongClick = {
@@ -366,21 +337,18 @@ fun Queue(
                                         },
                                         onClick = {
                                             if (isPlayingThisMediaItem) {
-                                                // Nếu là bài đang phát: tạm dừng / phát tiếp
                                                 if (shouldBePlaying) binder.player.pause()
                                                 else binder.player.play()
                                             } else {
-                                                // Nếu không phải, chuyển đến bài đó và phát
                                                 binder.player.seekToDefaultPosition(window.firstPeriodIndex)
                                                 binder.player.playWhenReady = true
                                             }
                                         }
                                     )
-                                    .animateItemPlacement(reorderingState) // Hiệu ứng di chuyển
-                                    .draggedItem(reorderingState, i) // Hỗ trợ kéo reorder
+                                    .animateItemPlacement(reorderingState)
+                                    .draggedItem(reorderingState, i)
                                     .background(colorPalette.background1)
                                     .let {
-                                        // Vuốt ngang để xóa nếu không phải bài đang phát
                                         if (PlayerPreferences.horizontalSwipeToRemoveItem && !isPlayingThisMediaItem)
                                             it.swipeToClose(
                                                 key = windows,
@@ -391,12 +359,11 @@ fun Queue(
                                             }
                                         else it
                                     },
-                                clip = !reorderingState.isDragging, // Không clip khi đang kéo
+                                clip = !reorderingState.isDragging,
                                 hideExplicit = !isPlayingThisMediaItem && AppearancePreferences.hideExplicit
                             )
                         }
 
-                        // Dấu phân cách giữa hàng đợi và đề xuất
                         item(
                             key = "divider",
                             contentType = { ContentType.Divider }
@@ -406,24 +373,107 @@ fun Queue(
                             )
                         }
 
-                        // Gợi ý bài hát
                         items(
                             items = visibleSuggestions,
                             key = { "suggestion_${it.mediaId}" },
                             contentType = { ContentType.Suggestion }
-                        ) {
+                        ) { suggestion ->
                             SongItem(
-                                song = it,
+                                song = suggestion,
                                 thumbnailSize = Dimensions.thumbnails.song,
-                                modifier = Modifier.clickable {
-                                    // Mở menu chọn hành động với bài gợi ý
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = ripple()
+                                ) {
                                     menuState.display {
-                                        BaseMediaItemMenu(
-                                            onDismiss = { menuState.hide() },
-                                            mediaItem = it,
-                                            onEnqueue = { binder.player.enqueue(it) }, // Thêm vào hàng đợi cuối
-                                            onPlayNext = { binder.player.addNext(it) } // Phát tiếp theo
-                                        )
+                                        if (isPodcastQueue) {
+                                            // Menu cho podcast: hiển thị danh sách PodcastPlaylist
+                                            var isCreatingNewPlaylist by rememberSaveable { mutableStateOf(false) }
+                                            val playlistPreviews by remember {
+                                                Database.podcastPlaylistPreviews(
+                                                    sortBy = PlaylistSortBy.DateAdded,
+                                                    sortOrder = SortOrder.Descending
+                                                ).onFirst { isCreatingNewPlaylist = it.isEmpty() }
+                                            }.collectAsState(initial = null, context = Dispatchers.IO)
+
+                                            if (isCreatingNewPlaylist) TextFieldDialog(
+                                                hintText = stringResource(R.string.enter_playlist_name_prompt),
+                                                onDismiss = { isCreatingNewPlaylist = false },
+                                                onAccept = { text ->
+                                                    menuState.hide()
+                                                    transaction {
+                                                        val playlistId = Database.insert(PodcastPlaylist(name = text))
+                                                        Database.insert(
+                                                            PodcastEpisodePlaylistMap(
+                                                                playlistId = playlistId,
+                                                                episodeId = suggestion.mediaId,
+                                                                position = 0
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            )
+
+                                            Menu {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier
+                                                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                                                        .fillMaxWidth()
+                                                ) {
+                                                    BasicText(
+                                                        text = stringResource(R.string.add_to_playlist),
+                                                        style = typography.m.semiBold,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        maxLines = 2,
+                                                        modifier = Modifier.weight(weight = 2f, fill = false)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    SecondaryTextButton(
+                                                        text = stringResource(R.string.new_playlist),
+                                                        onClick = { isCreatingNewPlaylist = true },
+                                                        alternative = true,
+                                                        modifier = Modifier.weight(weight = 1f, fill = false)
+                                                    )
+                                                }
+
+                                                if (playlistPreviews?.isEmpty() == true)
+                                                    Spacer(modifier = Modifier.height(160.dp))
+
+                                                playlistPreviews?.forEach { playlistPreview ->
+                                                    MenuEntry(
+                                                        icon = R.drawable.playlist,
+                                                        text = playlistPreview.name,
+                                                        secondaryText = pluralStringResource(
+                                                            id = R.plurals.podcast_episode_count_plural,
+                                                            count = playlistPreview.episodeCount,
+                                                            playlistPreview.episodeCount
+                                                        ),
+                                                        onClick = {
+                                                            menuState.hide()
+                                                            transaction {
+                                                                Database.insert(
+                                                                    PodcastEpisodePlaylistMap(
+                                                                        playlistId = playlistPreview.id,
+                                                                        episodeId = suggestion.mediaId,
+                                                                        position = playlistPreview.episodeCount
+                                                                    )
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            // Menu cho music
+                                            BaseMediaItemMenu(
+                                                onDismiss = { menuState.hide() },
+                                                mediaItem = suggestion,
+                                                onEnqueue = { binder.player.enqueue(suggestion) },
+                                                onPlayNext = { binder.player.addNext(suggestion) }
+                                            )
+                                        }
                                     }
                                 },
                                 trailingContent = {
@@ -436,13 +486,102 @@ fun Queue(
                                         IconButton(
                                             icon = R.drawable.play_skip_forward,
                                             color = colorPalette.text,
-                                            onClick = { binder.player.addNext(it) },
+                                            onClick = { binder.player.addNext(suggestion) },
                                             modifier = Modifier.size(18.dp)
                                         )
                                         IconButton(
                                             icon = R.drawable.enqueue,
                                             color = colorPalette.text,
-                                            onClick = { binder.player.enqueue(it) },
+                                            onClick = {
+                                                menuState.display {
+                                                    if (isPodcastQueue) {
+                                                        var isCreatingNewPlaylist by rememberSaveable { mutableStateOf(false) }
+                                                        val playlistPreviews by remember {
+                                                            Database.podcastPlaylistPreviews(
+                                                                sortBy = PlaylistSortBy.DateAdded,
+                                                                sortOrder = SortOrder.Descending
+                                                            ).onFirst { isCreatingNewPlaylist = it.isEmpty() }
+                                                        }.collectAsState(initial = null, context = Dispatchers.IO)
+
+                                                        if (isCreatingNewPlaylist) TextFieldDialog(
+                                                            hintText = stringResource(R.string.enter_playlist_name_prompt),
+                                                            onDismiss = { isCreatingNewPlaylist = false },
+                                                            onAccept = { text ->
+                                                                menuState.hide()
+                                                                transaction {
+                                                                    val playlistId = Database.insert(PodcastPlaylist(name = text))
+                                                                    Database.insert(
+                                                                        PodcastEpisodePlaylistMap(
+                                                                            playlistId = playlistId,
+                                                                            episodeId = suggestion.mediaId,
+                                                                            position = 0
+                                                                        )
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+
+                                                        Menu {
+                                                            Row(
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                modifier = Modifier
+                                                                    .padding(horizontal = 24.dp, vertical = 8.dp)
+                                                                    .fillMaxWidth()
+                                                            ) {
+                                                                BasicText(
+                                                                    text = stringResource(R.string.add_to_playlist),
+                                                                    style = typography.m.semiBold,
+                                                                    overflow = TextOverflow.Ellipsis,
+                                                                    maxLines = 2,
+                                                                    modifier = Modifier.weight(weight = 2f, fill = false)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(8.dp))
+                                                                SecondaryTextButton(
+                                                                    text = stringResource(R.string.new_playlist),
+                                                                    onClick = { isCreatingNewPlaylist = true },
+                                                                    alternative = true,
+                                                                    modifier = Modifier.weight(weight = 1f, fill = false)
+                                                                )
+                                                            }
+
+                                                            if (playlistPreviews?.isEmpty() == true)
+                                                                Spacer(modifier = Modifier.height(160.dp))
+
+                                                            playlistPreviews?.forEach { playlistPreview ->
+                                                                MenuEntry(
+                                                                    icon = R.drawable.playlist,
+                                                                    text = playlistPreview.name,
+                                                                    secondaryText = pluralStringResource(
+                                                                        id = R.plurals.podcast_episode_count_plural,
+                                                                        count = playlistPreview.episodeCount,
+                                                                        playlistPreview.episodeCount
+                                                                    ),
+                                                                    onClick = {
+                                                                        menuState.hide()
+                                                                        transaction {
+                                                                            Database.insert(
+                                                                                PodcastEpisodePlaylistMap(
+                                                                                    playlistId = playlistPreview.id,
+                                                                                    episodeId = suggestion.mediaId,
+                                                                                    position = playlistPreview.episodeCount
+                                                                                )
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        BaseMediaItemMenu(
+                                                            onDismiss = { menuState.hide() },
+                                                            mediaItem = suggestion,
+                                                            onEnqueue = { binder.player.enqueue(suggestion) },
+                                                            onPlayNext = { binder.player.addNext(suggestion) }
+                                                        )
+                                                    }
+                                                }
+                                            },
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -450,7 +589,6 @@ fun Queue(
                             )
                         }
 
-                        // Loading placeholder khi đang load radio hoặc chưa có gợi ý
                         item(
                             key = "loading",
                             contentType = { ContentType.Placeholder }
@@ -470,7 +608,6 @@ fun Queue(
                     }
                 }
 
-                // Nút "shuffle" nổi + scroll to top
                 FloatingActionsContainerWithScrollToTop(
                     lazyListState = lazyListState,
                     icon = R.drawable.shuffle,
@@ -478,38 +615,34 @@ fun Queue(
                     insets = windowInsets.only(WindowInsetsSides.Horizontal),
                     onClick = {
                         reorderingState.coroutineScope.launch {
-                            lazyListState.smoothScrollToTop() // Scroll về đầu
+                            lazyListState.smoothScrollToTop()
                         }.invokeOnCompletion {
-                            binder.player.shuffleQueue() // Trộn hàng đợi sau khi scroll xong
+                            binder.player.shuffleQueue()
                         }
                     }
                 )
             }
 
-
             Row(
                 modifier = Modifier
-                    // Khi click vào hàng này thì collapse soft input (bàn phím)
                     .clickable(onClick = layoutState::collapseSoft)
-                    .background(colorPalette.background2) // Nền của hàng
+                    .background(colorPalette.background2)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp) // Padding ngang
-                    .padding(horizontalBottomPaddingValues) // Padding thêm từ bên ngoài
-                    .height(64.dp), // Chiều cao cố định
+                    .padding(horizontal = 12.dp)
+                    .padding(horizontalBottomPaddingValues)
+                    .height(64.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Nút toggle vòng lặp hàng đợi
                 TextToggle(
-                    state = PlayerPreferences.queueLoopEnabled, // trạng thái hiện tại
+                    state = PlayerPreferences.queueLoopEnabled,
                     toggleState = {
                         PlayerPreferences.queueLoopEnabled = !PlayerPreferences.queueLoopEnabled
-                    }, // hành vi toggle
-                    name = stringResource(R.string.queue_loop) // text hiện lên
+                    },
+                    name = stringResource(R.string.queue_loop)
                 )
 
-                Spacer(modifier = Modifier.weight(1f)) // Đẩy icon ra giữa
+                Spacer(modifier = Modifier.weight(1f))
 
-                // Icon mũi tên xuống
                 Image(
                     painter = painterResource(R.drawable.chevron_down),
                     contentDescription = null,
@@ -517,112 +650,204 @@ fun Queue(
                     modifier = Modifier.size(18.dp)
                 )
 
-                Spacer(modifier = Modifier.weight(1f)) // Đẩy phần bên phải qua sát mép
+                Spacer(modifier = Modifier.weight(1f))
 
-                // Text hiển thị số bài hát trong hàng đợi, có click được
                 BasicText(
                     text = pluralStringResource(
-                        id = R.plurals.song_count_plural,
+                        id = if (isPodcastQueue) R.plurals.podcast_episode_count_plural else R.plurals.song_count_plural,
                         count = windows.size,
                         windows.size
                     ),
                     style = typography.xxs.medium,
                     modifier = Modifier
-                        .clip(16.dp.roundedShape) // Bo tròn nền text
+                        .clip(16.dp.roundedShape)
                         .clickable {
-                            // HÀM THÊM VÀO PLAYLIST
-                            fun addToPlaylist(playlist: Playlist, index: Int) = transaction {
-                                val playlistId = Database
-                                    .insert(playlist)
-                                    .takeIf { it != -1L } ?: playlist.id // Nếu insert thất bại thì dùng id cũ
-
-                                // Thêm từng bài hát vào playlist
-                                windows.forEachIndexed { i, window ->
-                                    val mediaItem = window.mediaItem
-                                    Database.insert(mediaItem)
-                                    Database.insert(
-                                        SongPlaylistMap(
-                                            songId = mediaItem.mediaId,
-                                            playlistId = playlistId,
-                                            position = index + i
-                                        )
-                                    )
-                                }
-                            }
-
-                            // Hiển thị menu chọn playlist
-                            menuState.display {
-                                var isCreatingNewPlaylist by rememberSaveable { mutableStateOf(false) }
-
-                                // Lấy danh sách playlist từ database, sắp xếp theo thời gian thêm
-                                val playlistPreviews by remember {
-                                    Database
-                                        .playlistPreviews(
+                            if (isPodcastQueue) {
+                                // Menu cho podcast queue: thêm vào PodcastPlaylist
+                                menuState.display {
+                                    var isCreatingNewPlaylist by rememberSaveable { mutableStateOf(false) }
+                                    val playlistPreviews by remember {
+                                        Database.podcastPlaylistPreviews(
                                             sortBy = PlaylistSortBy.DateAdded,
                                             sortOrder = SortOrder.Descending
-                                        )
-                                        .onFirst { isCreatingNewPlaylist = it.isEmpty() } // Nếu chưa có thì bật tạo mới
-                                }.collectAsState(initial = null, context = Dispatchers.IO)
+                                        ).onFirst { isCreatingNewPlaylist = it.isEmpty() }
+                                    }.collectAsState(initial = null, context = Dispatchers.IO)
 
-                                // Nếu đang tạo mới playlist thì hiển thị dialog nhập tên
-                                if (isCreatingNewPlaylist) TextFieldDialog(
-                                    hintText = stringResource(R.string.enter_playlist_name_prompt),
-                                    onDismiss = { isCreatingNewPlaylist = false },
-                                    onAccept = { text ->
-                                        menuState.hide()
-                                        addToPlaylist(Playlist(name = text), 0)
-                                    }
-                                )
-
-                                // Menu chính: chọn playlist hoặc tạo mới
-                                Menu {
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .padding(horizontal = 24.dp, vertical = 8.dp)
-                                            .fillMaxWidth()
-                                    ) {
-                                        BasicText(
-                                            text = stringResource(R.string.add_queue_to_playlist),
-                                            style = typography.m.semiBold,
-                                            overflow = TextOverflow.Ellipsis,
-                                            maxLines = 2,
-                                            modifier = Modifier.weight(weight = 2f, fill = false)
-                                        )
-
-                                        Spacer(modifier = Modifier.width(8.dp))
-
-                                        SecondaryTextButton(
-                                            text = stringResource(R.string.new_playlist),
-                                            onClick = { isCreatingNewPlaylist = true }, // Bật dialog tạo playlist
-                                            alternative = true,
-                                            modifier = Modifier.weight(weight = 1f, fill = false)
-                                        )
-                                    }
-
-                                    // Nếu không có playlist nào thì tạo khoảng trống
-                                    if (playlistPreviews?.isEmpty() == true)
-                                        Spacer(modifier = Modifier.height(160.dp))
-
-                                    // Duyệt danh sách playlist và hiển thị từng cái trong menu
-                                    playlistPreviews?.forEach { playlistPreview ->
-                                        MenuEntry(
-                                            icon = R.drawable.playlist,
-                                            text = playlistPreview.playlist.name,
-                                            secondaryText = pluralStringResource(
-                                                id = R.plurals.song_count_plural,
-                                                count = playlistPreview.songCount,
-                                                playlistPreview.songCount
-                                            ),
-                                            onClick = {
-                                                menuState.hide()
-                                                addToPlaylist(
-                                                    playlistPreview.playlist,
-                                                    playlistPreview.songCount
-                                                )
+                                    if (isCreatingNewPlaylist) TextFieldDialog(
+                                        hintText = stringResource(R.string.enter_playlist_name_prompt),
+                                        onDismiss = { isCreatingNewPlaylist = false },
+                                        onAccept = { text ->
+                                            menuState.hide()
+                                            transaction {
+                                                val playlistId = Database.insert(PodcastPlaylist(name = text))
+                                                windows.forEachIndexed { i, window ->
+                                                    Database.insert(
+                                                        PodcastEpisodePlaylistMap(
+                                                            playlistId = playlistId,
+                                                            episodeId = window.mediaItem.mediaId,
+                                                            position = i
+                                                        )
+                                                    )
+                                                }
                                             }
-                                        )
+                                        }
+                                    )
+
+                                    Menu {
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .padding(horizontal = 24.dp, vertical = 8.dp)
+                                                .fillMaxWidth()
+                                        ) {
+                                            BasicText(
+                                                text = stringResource(R.string.add_to_playlist),
+                                                style = typography.m.semiBold,
+                                                overflow = TextOverflow.Ellipsis,
+                                                maxLines = 2,
+                                                modifier = Modifier.weight(weight = 2f, fill = false)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            SecondaryTextButton(
+                                                text = stringResource(R.string.new_playlist),
+                                                onClick = { isCreatingNewPlaylist = true },
+                                                alternative = true,
+                                                modifier = Modifier.weight(weight = 1f, fill = false)
+                                            )
+                                        }
+
+                                        if (playlistPreviews?.isEmpty() == true)
+                                            Spacer(modifier = Modifier.height(160.dp))
+
+                                        playlistPreviews?.forEach { playlistPreview ->
+                                            MenuEntry(
+                                                icon = R.drawable.playlist,
+                                                text = playlistPreview.name,
+                                                secondaryText = pluralStringResource(
+                                                    id = R.plurals.podcast_episode_count_plural,
+                                                    count = playlistPreview.episodeCount,
+                                                    playlistPreview.episodeCount
+                                                ),
+                                                onClick = {
+                                                    menuState.hide()
+                                                    transaction {
+                                                        windows.forEachIndexed { i, window ->
+                                                            Database.insert(
+                                                                PodcastEpisodePlaylistMap(
+                                                                    playlistId = playlistPreview.id,
+                                                                    episodeId = window.mediaItem.mediaId,
+                                                                    position = playlistPreview.episodeCount + i
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Menu cho music queue: thêm vào Playlist
+                                // Ví dụ trong Queue.kt
+                                fun addToPlaylist(playlist: Playlist, index: Int) = transaction {
+                                    val playlistId = Database
+                                        .insert(playlist)
+                                        .takeIf { it != -1L } ?: playlist.id
+                                    windows.forEachIndexed { i, window ->
+                                        val mediaItem = window.mediaItem
+                                        val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast", false) == true
+                                        if (isPodcast) {
+                                            // Handle podcast episode
+                                            val podcastId = mediaItem.mediaMetadata.extras?.getString("podcastId") ?: return@forEachIndexed
+                                            val episode = PodcastEpisodeEntity(
+                                                videoId = mediaItem.mediaId,
+                                                podcastId = podcastId,
+                                                title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
+                                                thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                                durationText = mediaItem.mediaMetadata.extras?.getString("durationText"),
+                                                description = null,
+                                                publishedTimeText = null
+                                            )
+                                            runBlocking(Dispatchers.IO) { Database.insertEpisode(episode) }
+                                        } else {
+                                            Database.insert(mediaItem)
+                                            Database.insert(
+                                                SongPlaylistMap(
+                                                    songId = mediaItem.mediaId,
+                                                    playlistId = playlistId,
+                                                    position = index + i
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                menuState.display {
+                                    var isCreatingNewPlaylist by rememberSaveable { mutableStateOf(false) }
+                                    val playlistPreviews by remember {
+                                        Database
+                                            .playlistPreviews(
+                                                sortBy = PlaylistSortBy.DateAdded,
+                                                sortOrder = SortOrder.Descending
+                                            )
+                                            .onFirst { isCreatingNewPlaylist = it.isEmpty() }
+                                    }.collectAsState(initial = null, context = Dispatchers.IO)
+
+                                    if (isCreatingNewPlaylist) TextFieldDialog(
+                                        hintText = stringResource(R.string.enter_playlist_name_prompt),
+                                        onDismiss = { isCreatingNewPlaylist = false },
+                                        onAccept = { text ->
+                                            menuState.hide()
+                                            addToPlaylist(Playlist(name = text), 0)
+                                        }
+                                    )
+
+                                    Menu {
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .padding(horizontal = 24.dp, vertical = 8.dp)
+                                                .fillMaxWidth()
+                                        ) {
+                                            BasicText(
+                                                text = stringResource(R.string.add_queue_to_playlist),
+                                                style = typography.m.semiBold,
+                                                overflow = TextOverflow.Ellipsis,
+                                                maxLines = 2,
+                                                modifier = Modifier.weight(weight = 2f, fill = false)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            SecondaryTextButton(
+                                                text = stringResource(R.string.new_playlist),
+                                                onClick = { isCreatingNewPlaylist = true },
+                                                alternative = true,
+                                                modifier = Modifier.weight(weight = 1f, fill = false)
+                                            )
+                                        }
+
+                                        if (playlistPreviews?.isEmpty() == true)
+                                            Spacer(modifier = Modifier.height(160.dp))
+
+                                        playlistPreviews?.forEach { playlistPreview ->
+                                            MenuEntry(
+                                                icon = R.drawable.playlist,
+                                                text = playlistPreview.name,
+                                                secondaryText = pluralStringResource(
+                                                    id = R.plurals.song_count_plural,
+                                                    count = playlistPreview.songCount,
+                                                    playlistPreview.songCount
+                                                ),
+                                                onClick = {
+                                                    menuState.hide()
+                                                    addToPlaylist(
+                                                        Playlist(id = playlistPreview.id, name = playlistPreview.name),
+                                                        playlistPreview.songCount
+                                                    )
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -635,15 +860,12 @@ fun Queue(
     }
 }
 
-// Sử dụng @JvmInline để định nghĩa một inline class – tối ưu hóa hiệu năng, tránh allocation object không cần thiết
 @JvmInline
-private value class
-ContentType private constructor(val value: Int) {
+private value class ContentType private constructor(val value: Int) {
     companion object {
-        // Các hằng số đại diện cho từng loại nội dung
-        val Window = ContentType(value = 0)        // Đại diện cho kiểu cửa sổ
-        val Divider = ContentType(value = 1)       // Đại diện cho kiểu ngăn cách
-        val Suggestion = ContentType(value = 2)    // Gợi ý (ví dụ trong UI)
-        val Placeholder = ContentType(value = 3)   // Chỗ trống (ví dụ loading hoặc khi không có nội dung)
+        val Window = ContentType(value = 0)
+        val Divider = ContentType(value = 1)
+        val Suggestion = ContentType(value = 2)
+        val Placeholder = ContentType(value = 3)
     }
 }

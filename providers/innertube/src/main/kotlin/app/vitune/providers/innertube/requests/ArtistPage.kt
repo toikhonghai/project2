@@ -54,6 +54,7 @@ suspend fun Innertube.artistPage(body: BrowseBody) = runCatchingCancellable { //
         ?.findSectionByTitle(text)
 
     val songsSection = findSectionByTitle("Songs")?.musicShelfRenderer // tìm kiếm trong danh sách nội dung
+    logger.info("Songs section: $songsSection, Contents: ${songsSection?.contents?.size}")
     val albumsSection = findSectionByTitle("Albums")?.musicCarouselShelfRenderer // tìm kiếm trong danh sách nội dung
     val singlesSection = findSectionByTitle("Singles")?.musicCarouselShelfRenderer
 

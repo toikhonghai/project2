@@ -44,6 +44,8 @@ data class BrowseResponse(
             val foregroundThumbnail: ThumbnailRenderer?,
             val title: Runs?,
             val subscriptionButton: SubscriptionButton?
+
+
         ) {
             @Serializable
             data class PlayButton( // Nút phát nhạc
@@ -61,6 +63,7 @@ data class BrowseResponse(
             )
         }
     }
+
 
     @Serializable
     data class Microformat( // Chứa thông tin định dạng vi mô

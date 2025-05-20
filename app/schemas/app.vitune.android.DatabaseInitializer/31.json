@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 31,
-    "identityHash": "b829070f777ab511cf2b8191ab02c48e",
+    "identityHash": "4a39a4b2d633d4f7a95c920743429e97",
     "entities": [
       {
         "tableName": "Song",
@@ -752,7 +752,7 @@
       },
       {
         "tableName": "podcasts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`browseId` TEXT NOT NULL, `title` TEXT NOT NULL, `description` TEXT, `authorName` TEXT, `authorBrowseId` TEXT, `thumbnailUrl` TEXT, `episodeCount` INTEGER, `lastUpdated` INTEGER NOT NULL, PRIMARY KEY(`browseId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`browseId` TEXT NOT NULL, `title` TEXT NOT NULL, `description` TEXT, `authorName` TEXT, `authorBrowseId` TEXT, `thumbnailUrl` TEXT, `episodeCount` INTEGER, `playlistId` TEXT, `lastUpdated` INTEGER NOT NULL, PRIMARY KEY(`browseId`))",
         "fields": [
           {
             "fieldPath": "browseId",
@@ -794,6 +794,12 @@
             "fieldPath": "episodeCount",
             "columnName": "episodeCount",
             "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "playlistId",
+            "columnName": "playlistId",
+            "affinity": "TEXT",
             "notNull": false
           },
           {
@@ -979,7 +985,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b829070f777ab511cf2b8191ab02c48e')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4a39a4b2d633d4f7a95c920743429e97')"
     ]
   }
 }

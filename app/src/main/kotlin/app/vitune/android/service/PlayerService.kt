@@ -466,6 +466,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         if (totalPlayTimeMs < 5000) return
 
         val mediaItem = eventTime.timeline[eventTime.windowIndex].mediaItem
+        val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
+        val entityType = if (isPodcast) "PODCAST_EPISODE" else "SONG"
 
         if (!DataPreferences.pausePlaytime) query {
             runCatching {
@@ -479,7 +481,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     Event(
                         songId = mediaItem.mediaId,
                         timestamp = System.currentTimeMillis(),
-                        playTime = totalPlayTimeMs
+                        playTime = totalPlayTimeMs,
+                        entityType = entityType
                     )
                 )
             }
@@ -1230,13 +1233,19 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     ?.let { playRadio(it) }
             }
         }
-        fun playPodcastEpisode(episode: PodcastEpisodeEntity){
+        fun playPodcastEpisode(episode: PodcastEpisodeEntity) {
             coroutineScope.launch {
-                val mediaItem = episode.toMediaItem()
+                val mediaItem = episode.asMediaItem()
                 withContext(Dispatchers.Main) {
-                    player.setMediaItem(mediaItem, episode.playPositionMs)
-                    player.prepare()
-                    player.play()
+                    try {
+                        player.setMediaItem(mediaItem, episode.playPositionMs)
+                        player.prepare()
+                        player.play()
+                        Log.d(TAG, "Playing podcast episode: ${episode.title} (videoId: ${episode.videoId})")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to play podcast episode: ${episode.title}, error: ${e.message}", e)
+                        toast("Failed to play podcast: ${e.message}")
+                    }
                 }
             }
         }

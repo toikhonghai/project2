@@ -26,6 +26,7 @@
     <string name="albums">Albums</string>
     <string name="artists">Artists</string>
     <string name="singles">Singles</string>
+    <string name="no_playlists">No Playlists</string>
 
     <string name="favorites">Favorites</string>
     <string name="offline">Offline</string>
@@ -73,6 +74,34 @@
     <string name="reset">Reset</string>
     <string name="clear">Clear</string>
     <string name="view_all">View all</string>
+    <string name="share">Share</string>
+    <string name="logout_dialog_message">Are you sure you want to log out?</string>
+    <string name="logout_success">Logged out successfully</string>
+
+    <!-- Chuỗi cho AccountSettingsScreen -->
+    <string name="account_settings">Account Settings</string>
+    <string name="display_name">Display Name</string>
+    <string name="email">Email</string>
+    <string name="new_password_optional">New Password (Optional)</string>
+    <string name="current_password">Current Password</string>
+    <string name="forgot_password">Forgot Password?</string>
+    <string name="update_info">Update Information</string>
+    <string name="please_login_again">Please log in again after email verification.</string>
+    <string name="password_reset_email_sent">Password reset email sent to %s</string>
+    <string name="no_account_email_found">No account email found</string>
+    <string name="error_with_message">Error: %s</string>
+    <string name="no_changes_made">No changes made</string>
+    <string name="current_password_required">Please enter current password to confirm</string>
+    <string name="cannot_determine_user_email">Cannot determine user email</string>
+    <string name="account_not_email_password">Your account does not use email/password login</string>
+    <string name="reauthentication_failed">Authentication failed: Incorrect current password</string>
+    <string name="invalid_email">Invalid email</string>
+    <string name="verification_email_sent">Verification email sent to %s. Please verify before updating.</string>
+    <string name="cannot_send_verification_email">Cannot send verification email: %s</string>
+    <string name="cannot_update_display_name">Cannot update display name: %s</string>
+    <string name="cannot_update_password">Cannot update password: %s</string>
+    <string name="update_success">Information updated successfully</string>
+    <string name="update_failed">Update failed: %s</string>
 
     <string name="on_label">on</string>
     <string name="off_label">off</string>
@@ -383,11 +412,41 @@
     <string name="blacklist_empty">Blacklist empty</string>
 
     <string name="podcast">Podcast</string>
+    <string name="podcast_channels">Podcast Channels</string>
+    <string name="music">Music</string>
     <string name="pre_cache">Pre cache</string>
     <string name="new_podcast_episode">New Podcast Episode</string>
     <string name="new_podcast_episodes">New Podcast Episodes</string>
     <string name="downloading_podcast">Downloading Podcast</string>
     <string name="download_failed">Download Failed</string>
+    <string name="confirm_unsubscribe_podcast">Confirm Unsubscribe Podcast</string>
+    <string name="subscribed_podcasts">Subscribed</string>
+    <string name="no_subscribed_podcasts">No Subscribed Podcasts</string>
+    <string name="suggested_podcasts">Suggested</string>
+    <string name="no_suggestions_available">No Suggestions Available</string>
+    <string name="episodes">Episodes</string>
+    <string name="unsubscribe">Unsubscribe</string>
+    <string name="subscribe">Subscribe</string>
+    <string name="retry">Retry</string>
+    <string name="load_more">Load More</string>
+    <string name="no_podcasts_found">No podcasts found.</string>
+    <string name="podcasts">Podcasts</string>
+    <string name="podcast_playlist">Podcast Playlist</string>
+    <string name="podcast_playlists">Podcast Playlists</string>
+    <string name="enter_podcast_playlist_name_prompt">Enter the podcast playlist name</string>
+    <string name="new_podcast_playlist">New Podcast Playlist</string>
+    <plurals name="podcast_count_plural">
+        <item quantity="one">%d podcast</item>
+        <item quantity="other">%d podcasts</item>
+    </plurals>
+    <plurals name="podcast_episode_count_plural">
+        <item quantity="one">%d episode</item>
+        <item quantity="other">%d episodes</item>
+    </plurals>
+
+    <string name="register">Register</string>
+    <string name="download">Download</string>
+    <string name="delete_download">Delete</string>
 
     <string name="swipe_to_hide_song">Swipe to hide song</string>
     <string name="swipe_to_hide_song_description">When you swipe a song to the left, it gets removed from the database and cache</string>

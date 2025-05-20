@@ -1,13 +1,23 @@
 package app.vitune.android.ui.screens.home
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.media3.common.util.Log
 import app.vitune.android.R
 import app.vitune.android.models.toUiMood
 import app.vitune.android.preferences.UIStatePreferences
+import app.vitune.android.ui.components.themed.MainTab
 import app.vitune.android.ui.components.themed.Scaffold
+import app.vitune.android.ui.components.themed.TabsBuilder
 import app.vitune.android.ui.screens.GlobalRoutes
 import app.vitune.android.ui.screens.Route
+import app.vitune.android.ui.screens.accountSettingsRoute
 import app.vitune.android.ui.screens.albumRoute
 import app.vitune.android.ui.screens.artistRoute
 import app.vitune.android.ui.screens.builtInPlaylistRoute
@@ -20,31 +30,50 @@ import app.vitune.android.ui.screens.mood.MoreMoodsScreen
 import app.vitune.android.ui.screens.moodRoute
 import app.vitune.android.ui.screens.pipedPlaylistRoute
 import app.vitune.android.ui.screens.playlistRoute
+import app.vitune.android.ui.screens.podcast.HomeLocalPodcast
+import app.vitune.android.ui.screens.podcast.HomePodcastPlaylists
+import app.vitune.android.ui.screens.podcast.HomePodcasts
+import app.vitune.android.ui.screens.podcast.PodcastPlaylistScreen
+import app.vitune.android.ui.screens.podcast.SubscribedPodcastsScreen
+import app.vitune.android.ui.screens.podcast.SuggestedPodcastsScreen
+import app.vitune.android.ui.screens.podcastPlaylistRoute
+import app.vitune.android.ui.screens.podcastRoute
 import app.vitune.android.ui.screens.searchRoute
 import app.vitune.android.ui.screens.settingsRoute
+import app.vitune.compose.persist.LocalPersistMap
 import app.vitune.compose.persist.PersistMapCleanup
 import app.vitune.compose.routing.Route0
 import app.vitune.compose.routing.RouteHandler
 
-// Định nghĩa route tĩnh dùng để điều hướng tới màn hình hiển thị thêm mood và album
 private val moreMoodsRoute = Route0("moreMoodsRoute")
 private val moreAlbumsRoute = Route0("moreAlbumsRoute")
 
 @Route
 @Composable
 fun HomeScreen() {
-    // Lưu trạng thái của từng tab để giữ lại khi chuyển tab
     val saveableStateHolder = rememberSaveableStateHolder()
 
-    // Xóa cache liên quan đến "home/" khi không cần nữa
-    PersistMapCleanup("home/")
+    var selectedTab by rememberSaveable { mutableStateOf(MainTab.Music) }
+    var musicTabIndex by rememberSaveable { mutableStateOf(UIStatePreferences.homeScreenTabIndex) }
+    var podcastTabIndex by rememberSaveable { mutableStateOf(0) }
 
-    // Xử lý điều hướng các route bên trong màn hình Home
+    val persistMap = LocalPersistMap.current
+
+    LaunchedEffect(selectedTab, persistMap) {
+        if (selectedTab == MainTab.Music) {
+            persistMap?.clean("podcastScreen/")
+            persistMap?.clean("podcastDetail/")
+            persistMap?.clean("home/trending") // Thêm dòng này
+            persistMap?.clean("home/quickPicks/relatedPageResult") // Thêm dòng này
+        } else {
+            persistMap?.clean("home/")
+        }
+    }
+
     RouteHandler {
-        GlobalRoutes() // Route toàn cục (định nghĩa ở nơi khác)
+        GlobalRoutes()
 
-        // Các route chi tiết khác nhau bên trong màn hình Home
-        localPlaylistRoute { playlistId -> // playlistId = args[0] as P0
+        localPlaylistRoute { playlistId ->
             LocalPlaylistScreen(playlistId = playlistId)
         }
 
@@ -64,84 +93,142 @@ fun HomeScreen() {
             MoreAlbumsScreen()
         }
 
-        // Giao diện nội dung chính của màn hình Home
+        podcastPlaylistRoute { playlist ->
+            PodcastPlaylistScreen(
+                playlist = playlist,
+                onSearchClick = { searchRoute("") }
+            )
+        }
+
         Content {
+            val onSearchClick = { searchRoute("") }
+
+            val musicTabColumnContent: TabsBuilder.() -> Unit = {
+                tab(0, R.string.quick_picks, R.drawable.sparkles)
+                tab(1, R.string.discover, R.drawable.globe)
+                tab(2, R.string.songs, R.drawable.musical_notes)
+                tab(3, R.string.playlists, R.drawable.playlist)
+                tab(4, R.string.artists, R.drawable.person)
+                tab(5, R.string.albums, R.drawable.disc)
+                tab(6, R.string.local, R.drawable.download)
+            }
+
+            val podcastTabColumnContent: TabsBuilder.() -> Unit = {
+                tab(0, R.string.subscribed_podcasts, R.drawable.podcast, canHide = false)
+                tab(1, R.string.suggested_podcasts, R.drawable.sparkles, canHide = false)
+                tab(2, R.string.podcasts, R.drawable.musical_notes, canHide = false)
+                tab(3, R.string.playlists, R.drawable.playlist, canHide = false)
+                tab(4, R.string.local, R.drawable.download, canHide = false)
+            }
+
             Scaffold(
-                key = "home",
-                topIconButtonId = R.drawable.settings, // Nút cài đặt ở góc trên
-                onTopIconButtonClick = { settingsRoute() }, // Khi nhấn mở màn hình cài đặt
-                tabIndex = UIStatePreferences.homeScreenTabIndex, // Tab đang được chọn
-                onTabChange = { UIStatePreferences.homeScreenTabIndex = it }, // Khi chuyển tab
-                tabColumnContent = {
-                    // Danh sách các tab hiển thị phía trên giao diện
-                    tab(0, R.string.quick_picks, R.drawable.sparkles)     // Gợi ý nhanh
-                    tab(1, R.string.discover, R.drawable.globe)           // Khám phá
-                    tab(2, R.string.songs, R.drawable.musical_notes)      // Bài hát
-                    tab(3, R.string.playlists, R.drawable.playlist)       // Playlist
-                    tab(4, R.string.artists, R.drawable.person)           // Nghệ sĩ
-                    tab(5, R.string.albums, R.drawable.disc)              // Album
-                    tab(6, R.string.local, R.drawable.download)           // Nhạc offline
-                }
-            ) { currentTabIndex ->
-                // Mỗi tab giữ lại trạng thái riêng nhờ SaveableStateHolder
-                saveableStateHolder.SaveableStateProvider(key = currentTabIndex) {
-                    val onSearchClick = { searchRoute("") } // Hành động khi nhấn tìm kiếm
-
-                    // Hiển thị nội dung tương ứng với tab hiện tại
-                    when (currentTabIndex) {
-                        0 -> QuickPicks(
-                            onAlbumClick = { albumRoute(it.key) },
-                            onArtistClick = { artistRoute(it.key) },
-                            onPlaylistClick = {
-                                playlistRoute(
-                                    p0 = it.key,
-                                    p1 = null,
-                                    p2 = null,
-                                    p3 = it.channel?.name == "YouTube Music"
+                key = if (selectedTab == MainTab.Music) "home-music" else "home-podcast",
+                topIconButtonId = R.drawable.settings,
+                iconAccountButtonId = R.drawable.account,
+                onTopIconButtonClick = { settingsRoute() },
+                tabIndex = if (selectedTab == MainTab.Music) musicTabIndex else podcastTabIndex,
+                onTabChange = { index ->
+                    if (selectedTab == MainTab.Music) {
+                        musicTabIndex = index
+                        UIStatePreferences.homeScreenTabIndex = index
+                    } else {
+                        podcastTabIndex = index
+                    }
+                },
+                tabColumnContent = if (selectedTab == MainTab.Music) musicTabColumnContent else podcastTabColumnContent,
+                showMainTabs = true,
+                selectedMainTab = selectedTab,
+                onMainTabSelected = { newTab ->
+                    if (selectedTab != newTab) {
+                        selectedTab = newTab
+                        Log.e("screen podcast", "HomeScreen: selectedTab updated to $newTab")
+                    }
+                },
+                onAccountIconClick = {
+                    Log.d("HomeScreen", "Account icon clicked, navigating to AccountSettingsScreen")
+                    accountSettingsRoute() }
+            ) { currentIndex ->
+                saveableStateHolder.SaveableStateProvider(key = "${selectedTab}_$currentIndex") {
+                    when (selectedTab) {
+                        MainTab.Music -> {
+                            when (currentIndex) {
+                                0 -> QuickPicks(
+                                    onAlbumClick = { albumRoute(it.key) },
+                                    onArtistClick = { artistRoute(it.key) },
+                                    onPlaylistClick = {
+                                        playlistRoute(
+                                            p0 = it.key,
+                                            p1 = null,
+                                            p2 = null,
+                                            p3 = it.channel?.name == "YouTube Music"
+                                        )
+                                    },
+                                    onSearchClick = onSearchClick
                                 )
-                            },
-                            onSearchClick = onSearchClick
-                        )
 
-                        1 -> HomeDiscovery(
-                            onMoodClick = { mood -> moodRoute(mood.toUiMood()) },
-                            onNewReleaseAlbumClick = { albumRoute(it) },
-                            onSearchClick = onSearchClick,
-                            onMoreMoodsClick = { moreMoodsRoute() },
-                            onMoreAlbumsClick = { moreAlbumsRoute() },
-                            onPlaylistClick = { playlistRoute(it, null, null, true) }
-                        )
-
-                        2 -> HomeSongs(
-                            onSearchClick = onSearchClick
-                        )
-
-                        3 -> HomePlaylists(
-                            onBuiltInPlaylist = { builtInPlaylistRoute(it) },
-                            onPlaylistClick = { localPlaylistRoute(it.id) },
-                            onPipedPlaylistClick = { session, playlist ->
-                                pipedPlaylistRoute(
-                                    p0 = session.apiBaseUrl.toString(),
-                                    p1 = session.token,
-                                    p2 = playlist.id.toString()
+                                1 -> HomeDiscovery(
+                                    onMoodClick = { mood -> moodRoute(mood.toUiMood()) },
+                                    onNewReleaseAlbumClick = { albumRoute(it) },
+                                    onSearchClick = onSearchClick,
+                                    onMoreMoodsClick = { moreMoodsRoute() },
+                                    onMoreAlbumsClick = { moreAlbumsRoute() },
+                                    onPlaylistClick = { playlistRoute(it, null, null, true) }
                                 )
-                            },
-                            onSearchClick = onSearchClick
-                        )
 
-                        4 -> HomeArtistList(
-                            onArtistClick = { artistRoute(it.id) },
-                            onSearchClick = onSearchClick
-                        )
+                                2 -> HomeSongs(
+                                    onSearchClick = onSearchClick
+                                )
 
-                        5 -> HomeAlbums(
-                            onAlbumClick = { albumRoute(it.id) },
-                            onSearchClick = onSearchClick
-                        )
+                                3 -> HomePlaylists(
+                                    onBuiltInPlaylist = { builtInPlaylistRoute(it) },
+                                    onPlaylistClick = { localPlaylistRoute(it.id) },
+                                    onPipedPlaylistClick = { session, playlist ->
+                                        pipedPlaylistRoute(
+                                            p0 = session.apiBaseUrl.toString(),
+                                            p1 = session.token,
+                                            p2 = playlist.id.toString()
+                                        )
+                                    },
+                                    onSearchClick = onSearchClick
+                                )
 
-                        6 -> HomeLocalSongs(
-                            onSearchClick = onSearchClick
-                        )
+                                4 -> HomeArtistList(
+                                    onArtistClick = { artistRoute(it.id) },
+                                    onSearchClick = onSearchClick
+                                )
+
+                                5 -> HomeAlbums(
+                                    onAlbumClick = { albumRoute(it.id) },
+                                    onSearchClick = onSearchClick
+                                )
+
+                                6 -> HomeLocalSongs(
+                                    onSearchClick = onSearchClick
+                                )
+                            }
+                        }
+                        MainTab.Podcast -> {
+                            when (currentIndex) {
+                                0 -> SubscribedPodcastsScreen(
+                                    onSearchClick = onSearchClick,
+                                    navigationToPodcastDetail = { browseId -> podcastRoute(browseId) }
+                                )
+                                1 -> SuggestedPodcastsScreen(
+                                    onSearchClick = onSearchClick,
+                                    navigationToPodcastDetail = { browseId -> podcastRoute(browseId) }
+                                )
+                                2 -> HomePodcasts(
+                                    onSearchClick = onSearchClick
+                                )
+                                3 -> HomePodcastPlaylists(
+                                    onPlaylistClick = { podcastPlaylistRoute(it) },
+                                    onSearchClick = onSearchClick
+                                )
+                                4 -> HomeLocalPodcast(
+                                    onSearchClick = onSearchClick
+                                )
+                            }
+                        }
                     }
                 }
             }

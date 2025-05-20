@@ -36,6 +36,7 @@ import androidx.sqlite.db.SupportSQLiteQuery
 import app.vitune.android.models.Album
 import app.vitune.android.models.Artist
 import app.vitune.android.models.Event
+import app.vitune.android.models.EventWithPodcastEpisode
 import app.vitune.android.models.EventWithSong
 import app.vitune.android.models.Format
 import app.vitune.android.models.Info
@@ -46,6 +47,9 @@ import app.vitune.android.models.PlaylistPreview
 import app.vitune.android.models.PlaylistWithSongs
 import app.vitune.android.models.PodcastEntity
 import app.vitune.android.models.PodcastEpisodeEntity
+import app.vitune.android.models.PodcastEpisodePlaylistMap
+import app.vitune.android.models.PodcastPlaylist
+import app.vitune.android.models.PodcastPlaylistPreview
 import app.vitune.android.models.PodcastSubscriptionEntity
 import app.vitune.android.models.PodcastWithEpisodes
 import app.vitune.android.models.QueuedMediaItem
@@ -56,6 +60,7 @@ import app.vitune.android.models.SongArtistMap
 import app.vitune.android.models.SongPlaylistMap
 import app.vitune.android.models.SongWithContentLength
 import app.vitune.android.models.SortedSongPlaylistMap
+import app.vitune.android.models.User
 import app.vitune.android.service.LOCAL_KEY_PREFIX
 import app.vitune.core.data.enums.AlbumSortBy
 import app.vitune.core.data.enums.ArtistSortBy
@@ -66,7 +71,9 @@ import app.vitune.core.ui.utils.songBundle
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import io.ktor.http.Url
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 
 @Dao
 @Suppress("TooManyFunctions")
@@ -217,9 +224,10 @@ interface Database {
         SELECT Song.* FROM Event
         JOIN Song ON Song.id = Event.songId
         WHERE Event.ROWID in (
-	        SELECT max(Event.ROWID)
-	        FROM Event
-	        GROUP BY songId
+            SELECT max(Event.ROWID)
+            FROM Event
+            WHERE Event.entityType = 'SONG'
+            GROUP BY songId
         )
         ORDER BY timestamp DESC
         LIMIT :size
@@ -301,7 +309,6 @@ interface Database {
     @Query("SELECT * FROM Album WHERE bookmarkedAt IS NOT NULL ORDER BY title COLLATE NOCASE ASC")
     fun albumsByTitleAsc(): Flow<List<Album>>
 
-    // authorsText as fallback for when YouTube showed the year in the artist field
     @Query("SELECT * FROM Album WHERE bookmarkedAt IS NOT NULL ORDER BY year ASC, authorsText COLLATE NOCASE ASC")
     fun albumsByYearAsc(): Flow<List<Album>>
 
@@ -317,7 +324,6 @@ interface Database {
     @Query("SELECT * FROM Album WHERE bookmarkedAt IS NOT NULL ORDER BY bookmarkedAt DESC")
     fun albumsByRowIdDesc(): Flow<List<Album>>
 
-    // Hàm để lấy danh sách album theo tiêu chí sắp xếp
     fun albums(sortBy: AlbumSortBy, sortOrder: SortOrder) = when (sortBy) {
         AlbumSortBy.Title -> when (sortOrder) {
             SortOrder.Ascending -> albumsByTitleAsc()
@@ -344,7 +350,6 @@ interface Database {
     @Query("SELECT * FROM Playlist WHERE id = :id")
     fun playlist(id: Long): Flow<Playlist?>
 
-    // TODO: apparently this is an edge-case now?
     @RewriteQueriesToDropUnusedColumns
     @Transaction
     @Query(
@@ -614,6 +619,7 @@ interface Database {
         SELECT Song.* FROM Event
         JOIN Song ON Song.id = songId
         WHERE Song.id NOT LIKE '$LOCAL_KEY_PREFIX%'
+        AND Event.entityType = 'SONG'
         GROUP BY songId
         ORDER BY SUM(playTime)
         DESC LIMIT :limit
@@ -629,6 +635,7 @@ interface Database {
         JOIN Song ON Song.id = songId
         WHERE (:now - Event.timestamp) <= :period AND
         Song.id NOT LIKE '$LOCAL_KEY_PREFIX%'
+        AND Event.entityType = 'SONG'
         GROUP BY songId
         ORDER BY SUM(playTime) DESC
         LIMIT :limit
@@ -642,16 +649,16 @@ interface Database {
     ): Flow<List<Song>>
 
     @Transaction
-    @Query("SELECT * FROM Event ORDER BY timestamp DESC")
+    @Query("SELECT * FROM Event WHERE entityType = 'SONG' ORDER BY timestamp DESC")
     fun events(): Flow<List<EventWithSong>>
 
-    @Query("SELECT COUNT (*) FROM Event")
+    @Query("SELECT COUNT (*) FROM Event WHERE entityType = 'SONG'")
     fun eventsCount(): Flow<Int>
 
-    @Query("DELETE FROM Event")
+    @Query("DELETE FROM Event WHERE Event.entityType = 'SONG'")
     fun clearEvents()
 
-    @Query("DELETE FROM Event WHERE songId = :songId")
+    @Query("DELETE FROM Event WHERE songId = :songId AND entityType = 'SONG'")
     fun clearEventsFor(songId: String)
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -693,27 +700,48 @@ interface Database {
 
     @Transaction
     fun insert(mediaItem: MediaItem, block: (Song) -> Song = { it }) {
-        val extras = mediaItem.mediaMetadata.extras?.songBundle
+        val extras = mediaItem.mediaMetadata.extras
+        val isPodcast = extras?.getBoolean("isPodcast", false) == true
+        if (isPodcast) {
+            // Handle podcast episode
+            val podcastId = extras.getString("podcastId") ?: return
+            val episode = PodcastEpisodeEntity(
+                videoId = mediaItem.mediaId,
+                podcastId = podcastId,
+                title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
+                thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                durationText = extras.getString("durationText"),
+                description = null,
+                publishedTimeText = null
+            )
+            // Use runBlocking to call suspend function in a synchronous context
+            runBlocking(Dispatchers.IO) {
+                insertEpisode(episode)
+            }
+            return
+        }
+
+        // Handle song
         val song = Song(
             id = mediaItem.mediaId,
             title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
             artistsText = mediaItem.mediaMetadata.artist?.toString(),
-            durationText = extras?.durationText,
+            durationText = extras?.getString("durationText"),
             thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
-            explicit = extras?.explicit == true
+            explicit = extras?.getBoolean("explicit") == true
         ).let(block).also { song ->
             if (insert(song) == -1L) return
         }
 
-        extras?.albumId?.let { albumId ->
+        extras?.getString("albumId")?.let { albumId ->
             insert(
                 Album(id = albumId, title = mediaItem.mediaMetadata.albumTitle?.toString()),
                 SongAlbumMap(songId = song.id, albumId = albumId, position = null)
             )
         }
 
-        extras?.artistNames?.let { artistNames ->
-            extras.artistIds?.let { artistIds ->
+        extras?.getStringArrayList("artistNames")?.let { artistNames ->
+            extras.getStringArrayList("artistIds")?.let { artistIds ->
                 if (artistNames.size == artistIds.size) insert(
                     artistNames.mapIndexed { index, artistName ->
                         Artist(
@@ -778,6 +806,9 @@ interface Database {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPodCasts(podcasts: List<PodcastEntity>)
 
+    @Query("SELECT playlistId FROM podcasts WHERE browseId = :browseId")
+    suspend fun getPodcastPlaylistId(browseId: String): String?
+
     @Update
     suspend fun updatePodcast(podcast: PodcastEntity)
 
@@ -802,6 +833,9 @@ interface Database {
     @Update
     suspend fun updateEpisode(episode: PodcastEpisodeEntity)
 
+    @Update
+    suspend fun update(podcastPlaylist: PodcastPlaylist)
+
     @Query("UPDATE podcast_episodes SET playPositionMs = :positionMs WHERE videoId = :videoId")
     suspend fun updateEpisodePosition(videoId: String, positionMs: Long)
 
@@ -820,35 +854,34 @@ interface Database {
 
     @Query(
         """
-    SELECT * FROM podcast_episodes 
-    WHERE podcastId = :podcastId 
-    ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
-"""
+        SELECT * FROM podcast_episodes 
+        WHERE podcastId = :podcastId 
+        ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
+        """
     )
     fun getEpisodesForPodcast(podcastId: String): PagingSource<Int, PodcastEpisodeEntity>
 
     @Query(
         """
-    SELECT * FROM podcast_episodes 
-    WHERE podcastId = :podcastId 
-    ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
-    """
+        SELECT * FROM podcast_episodes 
+        WHERE podcastId = :podcastId 
+        ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
+        """
     )
     fun getEpisodesForPodcastAsFlow(podcastId: String): Flow<List<PodcastEpisodeEntity>>
 
     @Query(
         """
-    SELECT * FROM podcast_episodes 
-    WHERE isDownloaded = 1 
-    ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
-"""
+        SELECT * FROM podcast_episodes 
+        WHERE isDownloaded = 1 
+        ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
+        """
     )
     fun getDownloadedEpisodes(): Flow<List<PodcastEpisodeEntity>>
 
     @Query("SELECT * FROM podcast_episodes WHERE lastPlayed IS NOT NULL ORDER BY lastPlayed DESC LIMIT :limit")
     fun getRecentlyPlayedEpisodes(limit: Int = 20): Flow<List<PodcastEpisodeEntity>>
 
-    // Các phương thức cho đăng ký podcast
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSubscription(subscription: PodcastSubscriptionEntity)
 
@@ -864,10 +897,159 @@ interface Database {
     @Query("UPDATE podcast_subscriptions SET notificationEnabled = :enabled WHERE browseId = :browseId")
     suspend fun updateNotificationStatus(browseId: String, enabled: Boolean)
 
-    // Truy vấn quan hệ
     @Transaction
     @Query("SELECT * FROM podcasts WHERE browseId = :browseId")
     suspend fun getPodcastWithEpisodes(browseId: String): PodcastWithEpisodes?
+
+    @Query("SELECT * FROM podcasts LIMIT :limit")
+    suspend fun getPodcasts(limit: Int): List<PodcastEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM podcast_episodes WHERE videoId = :videoId)")
+    suspend fun episodeExists(videoId: String): Boolean
+
+    @Query(
+        """
+        UPDATE podcast_episodes
+        SET title = :title, description = :description, thumbnailUrl = :thumbnailUrl, 
+            durationText = :durationText, publishedTimeText = :publishedTimeText
+        WHERE videoId = :videoId
+        """
+    )
+    suspend fun updateEpisodeMetadata(
+        videoId: String,
+        title: String,
+        description: String?,
+        thumbnailUrl: String?,
+        durationText: String?,
+        publishedTimeText: String?
+    )
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist 
+        ORDER BY name COLLATE NOCASE ASC
+        """
+    )
+    fun podcastPlaylistPreviewsByNameAsc(): Flow<List<PodcastPlaylistPreview>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist
+        ORDER BY ROWID ASC
+        """
+    )
+    fun podcastPlaylistPreviewsByDateAddedAsc(): Flow<List<PodcastPlaylistPreview>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist
+        ORDER BY episodeCount ASC
+        """
+    )
+    fun podcastPlaylistPreviewsByEpisodeCountAsc(): Flow<List<PodcastPlaylistPreview>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist
+        ORDER BY name COLLATE NOCASE DESC
+        """
+    )
+    fun podcastPlaylistPreviewsByNameDesc(): Flow<List<PodcastPlaylistPreview>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist
+        ORDER BY ROWID DESC
+        """
+    )
+    fun podcastPlaylistPreviewsByDateAddedDesc(): Flow<List<PodcastPlaylistPreview>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT id, name, (SELECT COUNT(*) FROM PodcastEpisodePlaylistMap WHERE playlistId = id) as episodeCount, thumbnail FROM PodcastPlaylist
+        ORDER BY episodeCount DESC
+        """
+    )
+    fun podcastPlaylistPreviewsByEpisodeCountDesc(): Flow<List<PodcastPlaylistPreview>>
+
+    fun podcastPlaylistPreviews(
+        sortBy: PlaylistSortBy,
+        sortOrder: SortOrder
+    ) = when (sortBy) {
+        PlaylistSortBy.Name -> when (sortOrder) {
+            SortOrder.Ascending -> podcastPlaylistPreviewsByNameAsc()
+            SortOrder.Descending -> podcastPlaylistPreviewsByNameDesc()
+        }
+
+        PlaylistSortBy.SongCount -> when (sortOrder) {
+            SortOrder.Ascending -> podcastPlaylistPreviewsByEpisodeCountAsc()
+            SortOrder.Descending -> podcastPlaylistPreviewsByEpisodeCountDesc()
+        }
+
+        PlaylistSortBy.DateAdded -> when (sortOrder) {
+            SortOrder.Ascending -> podcastPlaylistPreviewsByDateAddedAsc()
+            SortOrder.Descending -> podcastPlaylistPreviewsByDateAddedDesc()
+        }
+    }
+
+    @Query(
+        """
+        SELECT thumbnailUrl FROM podcast_episodes
+        JOIN PodcastEpisodePlaylistMap ON videoId = episodeId
+        WHERE playlistId = :id
+        ORDER BY position
+        LIMIT 4
+        """
+    )
+    fun podcastPlaylistThumbnailUrls(id: Long): Flow<List<String?>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insert(podcastPlaylist: PodcastPlaylist): Long
+
+    @Delete
+    fun delete(podcastPlaylist: PodcastPlaylist)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    fun insert(podcastEpisodePlaylistMap: PodcastEpisodePlaylistMap): Long
+
+    @Delete
+    fun delete(podcastEpisodePlaylistMap: PodcastEpisodePlaylistMap)
+
+    @Query("SELECT * FROM PodcastPlaylist WHERE id = :id")
+    fun podcastPlaylist(id: Long): Flow<PodcastPlaylist?>
+
+    @Transaction
+    @Query(
+        """
+        SELECT podcast_episodes.* FROM PodcastEpisodePlaylistMap
+        INNER JOIN podcast_episodes ON podcast_episodes.videoId = PodcastEpisodePlaylistMap.episodeId
+        WHERE playlistId = :id
+        ORDER BY PodcastEpisodePlaylistMap.position
+        """
+    )
+    fun podcastPlaylistEpisodes(id: Long): Flow<List<PodcastEpisodeEntity>?>
+
+    @Query("DELETE FROM PodcastEpisodePlaylistMap WHERE playlistId = :id")
+    fun clearPodcastPlaylist(id: Long)
+
+    @Transaction
+    @Query("SELECT * FROM Event WHERE entityType = 'PODCAST_EPISODE' ORDER BY timestamp DESC")
+    fun podcastEvents(): Flow<List<EventWithPodcastEpisode>>
+
+    @Query("UPDATE podcast_episodes SET playPositionMs = :playPositionMs WHERE videoId = :videoId")
+    suspend fun updateEpisodePlayPosition(videoId: String, playPositionMs: Long)
+
+    @Query("SELECT * FROM Song WHERE isDownloaded = 1 ORDER BY ROWID DESC")
+    fun getDownloadedSongs(): Flow<List<Song>>
+
+    @Query("UPDATE Song SET isDownloaded = :isDownloaded, downloadPath = :downloadPath WHERE id = :songId")
+    suspend fun updateSongDownloadStatus(songId: String, isDownloaded: Boolean, downloadPath: String?)
 }
 
 @androidx.room.Database(
@@ -888,9 +1070,12 @@ interface Database {
         PodcastEntity::class,
         PodcastEpisodeEntity::class,
         PodcastSubscriptionEntity::class,
+        PodcastPlaylist::class,
+        PodcastEpisodePlaylistMap::class,
+        User::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 31,
+    version = 36,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -917,7 +1102,9 @@ interface Database {
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
-        AutoMigration(from = 29, to = 30)
+        AutoMigration(from = 29, to = 30),
+        AutoMigration(from = 30, to = 31),
+        AutoMigration(from = 31, to = 32)
     ]
 )
 @TypeConverters(Converters::class)
@@ -940,7 +1127,12 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
                 From14To15Migration(),
                 From22To23Migration(),
                 From23To24Migration(),
-                From30To31Migration()
+                From30To31Migration(),
+                From31To32Migration(),
+                From32To33Migration(),
+                From33To34Migration(),
+                From34To35Migration(),
+                From35To36Migration()
             )
             .build()
 
@@ -1186,6 +1378,7 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
         override fun migrate(db: SupportSQLiteDatabase) =
             db.execSQL("ALTER TABLE Song ADD COLUMN loudnessBoost REAL")
     }
+
     class From30To31Migration : Migration(30, 31) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(
@@ -1244,6 +1437,62 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
                     )
                 """.trimIndent()
             )
+        }
+    }
+
+    class From31To32Migration : Migration(31, 32) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE podcasts ADD COLUMN playlistId TEXT")
+        }
+    }
+
+    class From32To33Migration : Migration(32, 33) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+            CREATE TABLE IF NOT EXISTS `PodcastPlaylist` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `name` TEXT NOT NULL,
+                `thumbnail` TEXT
+            )
+            """
+            )
+            db.execSQL(
+                """
+            CREATE TABLE IF NOT EXISTS `PodcastEpisodePlaylistMap` (
+                `playlistId` INTEGER NOT NULL,
+                `episodeId` TEXT NOT NULL,
+                `position` INTEGER NOT NULL,
+                PRIMARY KEY(`playlistId`, `episodeId`),
+                FOREIGN KEY(`playlistId`) REFERENCES `PodcastPlaylist`(`id`) ON DELETE CASCADE,
+                FOREIGN KEY(`episodeId`) REFERENCES `podcast_episodes`(`videoId`) ON DELETE CASCADE
+            )
+            """
+            )
+        }
+    }
+    class From33To34Migration : Migration(33, 34) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE Event ADD COLUMN entityType TEXT NOT NULL DEFAULT 'SONG'")
+        }
+    }
+    class From34To35Migration : Migration(34, 35) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS `User` (
+                    `email` TEXT NOT NULL,
+                    `password` TEXT NOT NULL,
+                    `name` TEXT,
+                    `createdAt` INTEGER NOT NULL,
+                    PRIMARY KEY(`email`)
+                )
+            """.trimIndent())
+        }
+    }
+    class From35To36Migration : Migration(35, 36) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE Song ADD COLUMN isDownloaded INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE Song ADD COLUMN downloadPath TEXT DEFAULT NULL")
         }
     }
 }

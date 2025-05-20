@@ -1,12 +1,15 @@
 package app.vitune.android.ui.screens.album
 
 import android.content.Intent
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -47,18 +50,23 @@ import app.vitune.providers.innertube.requests.albumPage
 import com.valentinilk.shimmer.shimmer
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Route
 @Composable
 fun AlbumScreen(browseId: String) {
     val saveableStateHolder = rememberSaveableStateHolder()
+    val tag = "AlbumScreen"
+
+    Log.d(tag, "Loading album with browseId=$browseId")
 
     val tabIndexState = rememberSaveable(saver = stateFlowSaver()) { MutableStateFlow(0) }
     val tabIndex by tabIndexState.collectAsState()
@@ -69,61 +77,83 @@ fun AlbumScreen(browseId: String) {
 
     PersistMapCleanup(prefix = "album/$browseId/")
 
+    // Lưu trữ coroutine job để hủy khi dispose
+    var job by rememberSaveable { mutableStateOf<Job?>(null) }
+
     LaunchedEffect(Unit) {
-        Database
-            .albumSongs(browseId)
-            .distinctUntilChanged()
-            .combine(
-                Database
-                    .album(browseId)
-                    .distinctUntilChanged()
-                    .cancellable()
-            ) { currentSongs, currentAlbum ->
-                album = currentAlbum
-                songs = currentSongs.toImmutableList()
+        job = launch {
+            Database
+                .albumSongs(browseId)
+                .distinctUntilChanged()
+                .combine(
+                    Database
+                        .album(browseId)
+                        .distinctUntilChanged()
+                        .cancellable()
+                ) { currentSongs, currentAlbum ->
+                    Log.d(tag, "Database: currentSongs.size=${currentSongs.size}, currentAlbum=$currentAlbum")
+                    album = currentAlbum
+                    songs = currentSongs.toImmutableList()
 
-                if (currentAlbum?.timestamp != null && currentSongs.isNotEmpty()) return@combine
+                    if (currentAlbum?.timestamp != null && currentSongs.isNotEmpty()) {
+                        Log.d(tag, "Using cached data for album $browseId")
+                        return@combine
+                    }
 
-                withContext(Dispatchers.IO) {
-                    Innertube.albumPage(BrowseBody(browseId = browseId))
-                        ?.completed()
-                        ?.onSuccess { newAlbumPage ->
-                            albumPage = newAlbumPage
+                    withContext(Dispatchers.IO) {
+                        Log.d(tag, "Fetching albumPage from API for browseId=$browseId")
+                        Innertube.albumPage(BrowseBody(browseId = browseId))
+                            ?.completed()
+                            ?.onSuccess { newAlbumPage ->
+                                Log.d(tag, "API success, newAlbumPage=$newAlbumPage")
+                                albumPage = newAlbumPage
 
-                            transaction {
-                                Database.clearAlbum(browseId)
-
-                                Database.upsert(
-                                    album = Album(
-                                        id = browseId,
-                                        title = newAlbumPage.title,
-                                        description = newAlbumPage.description,
-                                        thumbnailUrl = newAlbumPage.thumbnail?.url,
-                                        year = newAlbumPage.year,
-                                        authorsText = newAlbumPage.authors
-                                            ?.joinToString("") { it.name.orEmpty() },
-                                        shareUrl = newAlbumPage.url,
-                                        timestamp = System.currentTimeMillis(),
-                                        bookmarkedAt = album?.bookmarkedAt,
-                                        otherInfo = newAlbumPage.otherInfo
-                                    ),
-                                    songAlbumMaps = newAlbumPage
-                                        .songsPage
-                                        ?.items
-                                        ?.map { it.asMediaItem }
-                                        ?.onEach { Database.insert(it) }
-                                        ?.mapIndexed { position, mediaItem ->
-                                            SongAlbumMap(
-                                                songId = mediaItem.mediaId,
-                                                albumId = browseId,
-                                                position = position
-                                            )
-                                        } ?: emptyList()
-                                )
+                                transaction {
+                                    Database.clearAlbum(browseId)
+                                    Database.upsert(
+                                        album = Album(
+                                            id = browseId,
+                                            title = newAlbumPage.title,
+                                            description = newAlbumPage.description,
+                                            thumbnailUrl = newAlbumPage.thumbnail?.url,
+                                            year = newAlbumPage.year,
+                                            authorsText = newAlbumPage.authors
+                                                ?.joinToString("") { it.name.orEmpty() },
+                                            shareUrl = newAlbumPage.url,
+                                            timestamp = System.currentTimeMillis(),
+                                            bookmarkedAt = album?.bookmarkedAt,
+                                            otherInfo = newAlbumPage.otherInfo
+                                        ),
+                                        songAlbumMaps = newAlbumPage
+                                            .songsPage
+                                            ?.items
+                                            ?.map { it.asMediaItem }
+                                            ?.onEach { Database.insert(it) }
+                                            ?.mapIndexed { position, mediaItem ->
+                                                SongAlbumMap(
+                                                    songId = mediaItem.mediaId,
+                                                    albumId = browseId,
+                                                    position = position
+                                                )
+                                            } ?: emptyList()
+                                    )
+                                }
+                            }?.exceptionOrNull()?.let { error ->
+                                Log.d(tag, "API failed for browseId=$browseId, error=$error")
+                                error.printStackTrace()
                             }
-                        }?.exceptionOrNull()?.printStackTrace()
-                }
-            }.collect()
+                    }
+                }.collect()
+        }
+    }
+
+    // Hủy job khi composable bị dispose
+    DisposableEffect(Unit) {
+        onDispose {
+            Log.d(tag, "Disposing AlbumScreen, canceling job for browseId=$browseId")
+            job?.cancel()
+            job = null
+        }
     }
 
     RouteHandler {
@@ -134,11 +164,14 @@ fun AlbumScreen(browseId: String) {
                 beforeContent: (@Composable () -> Unit)?,
                 afterContent: (@Composable () -> Unit)?
             ) -> Unit = { beforeContent, afterContent ->
-                if (album?.timestamp == null) HeaderPlaceholder(modifier = Modifier.shimmer())
-                else {
+                if (album?.timestamp == null) {
+                    Log.d(tag, "Showing HeaderPlaceholder for browseId=$browseId")
+                    HeaderPlaceholder(modifier = Modifier.shimmer())
+                } else {
                     val (colorPalette) = LocalAppearance.current
                     val context = LocalContext.current
 
+                    Log.d(tag, "Showing Header with title=${album?.title} for browseId=$browseId")
                     Header(title = album?.title ?: stringResource(R.string.unknown)) {
                         beforeContent?.invoke()
 
@@ -153,7 +186,7 @@ fun AlbumScreen(browseId: String) {
                             onClick = {
                                 val bookmarkedAt =
                                     if (album?.bookmarkedAt == null) System.currentTimeMillis() else null
-
+                                Log.d(tag, "Toggling bookmark for browseId=$browseId, bookmarkedAt=$bookmarkedAt")
                                 query {
                                     album
                                         ?.copy(bookmarkedAt = bookmarkedAt)
@@ -167,12 +200,12 @@ fun AlbumScreen(browseId: String) {
                             color = colorPalette.text,
                             onClick = {
                                 album?.shareUrl?.let { url ->
+                                    Log.d(tag, "Sharing album URL=$url for browseId=$browseId")
                                     val sendIntent = Intent().apply {
                                         action = Intent.ACTION_SEND
                                         type = "text/plain"
                                         putExtra(Intent.EXTRA_TEXT, url)
                                     }
-
                                     context.startActivity(
                                         Intent.createChooser(sendIntent, null)
                                     )
@@ -188,12 +221,16 @@ fun AlbumScreen(browseId: String) {
                 url = album?.thumbnailUrl
             )
 
+            Log.d(tag, "Rendering Scaffold with songs.size=${songs.size} for browseId=$browseId")
             Scaffold(
                 key = "album",
                 topIconButtonId = R.drawable.chevron_back,
                 onTopIconButtonClick = pop,
                 tabIndex = tabIndex,
-                onTabChange = { newTab -> tabIndexState.update { newTab } },
+                onTabChange = { newTab ->
+                    Log.d(tag, "Changing tab to $newTab for browseId=$browseId")
+                    tabIndexState.update { newTab }
+                },
                 tabColumnContent = {
                     tab(0, R.string.songs, R.drawable.musical_notes, canHide = false)
                     tab(1, R.string.other_versions, R.drawable.disc)
@@ -201,17 +238,21 @@ fun AlbumScreen(browseId: String) {
             ) { currentTabIndex ->
                 saveableStateHolder.SaveableStateProvider(key = currentTabIndex) {
                     when (currentTabIndex) {
-                        0 -> AlbumSongs(
-                            songs = songs,
-                            headerContent = headerContent,
-                            thumbnailContent = thumbnailContent,
-                            afterHeaderContent = {
-                                if (album == null) PlaylistInfo(playlist = albumPage)
-                                else PlaylistInfo(playlist = album)
-                            }
-                        )
+                        0 -> {
+                            Log.d(tag, "Rendering AlbumSongs with songs.size=${songs.size} for browseId=$browseId")
+                            AlbumSongs(
+                                songs = songs,
+                                headerContent = headerContent,
+                                thumbnailContent = thumbnailContent,
+                                afterHeaderContent = {
+                                    if (album == null) PlaylistInfo(playlist = albumPage)
+                                    else PlaylistInfo(playlist = album)
+                                }
+                            )
+                        }
 
                         1 -> {
+                            Log.d(tag, "Rendering ItemsPage for other versions, browseId=$browseId")
                             ItemsPage(
                                 tag = "album/$browseId/alternatives",
                                 header = headerContent,
@@ -232,7 +273,10 @@ fun AlbumScreen(browseId: String) {
                                     AlbumItem(
                                         album = album,
                                         thumbnailSize = Dimensions.thumbnails.album,
-                                        modifier = Modifier.clickable { albumRoute(album.key) }
+                                        modifier = Modifier.clickable {
+                                            Log.d(tag, "Navigating to album ${album.key} from browseId=$browseId")
+                                            albumRoute(album.key)
+                                        }
                                     )
                                 },
                                 itemPlaceholderContent = {

@@ -130,11 +130,6 @@ fun HomeDiscovery(
                 .background(colorPalette.background0)
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(
-                    windowInsets
-                        .only(WindowInsetsSides.Vertical)
-                        .asPaddingValues()
-                )
         ) {
             Header(
                 title = stringResource(R.string.discover),

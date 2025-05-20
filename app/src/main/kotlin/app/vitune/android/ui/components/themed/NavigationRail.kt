@@ -197,30 +197,25 @@ sealed class Tab : Parcelable {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-// Hàm này tạo một thanh điều hướng theo chiều dọc (Navigation Rail) với các tab.
-inline fun NavigationRail(
-    topIconButtonId: Int, // ID của icon nút ở trên cùng
-    noinline onTopIconButtonClick: () -> Unit, // Hàm xử lý khi nhấn vào icon nút trên cùng
-    tabIndex: Int, // Chỉ mục tab hiện tại
-    crossinline onTabIndexChange: (Int) -> Unit, // Hàm thay đổi chỉ mục tab
-    hiddenTabs: ImmutableList<String>, // Danh sách các tab bị ẩn
-    crossinline setHiddenTabs: (List<String>) -> Unit, // Hàm để cập nhật danh sách tab ẩn
+fun NavigationRail(
+    tabIndex: Int,
+    onTabIndexChange: (Int) -> Unit,
+    hiddenTabs: ImmutableList<String>,
+    setHiddenTabs: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
-    tabsEditingTitle: String = stringResource(R.string.tabs), // Tiêu đề chỉnh sửa tab
-    crossinline content: TabsBuilder.() -> Unit // Nội dung của các tab
+    tabsEditingTitle: String = stringResource(R.string.tabs),
+    content: TabsBuilder.() -> Unit,
 ) {
-    val (colorPalette, typography) = LocalAppearance.current // Lấy thông tin về giao diện
-
-    val tabs = TabsBuilder.rememberTabs(content) // Ghi nhớ danh sách tab từ content
-    val isLandscape = isLandscape // Kiểm tra có đang ở chế độ ngang không
+    val (colorPalette, typography) = LocalAppearance.current
+    val tabs = TabsBuilder.rememberTabs(content)
+    val isLandscape = isLandscape
 
     val paddingValues = LocalPlayerAwareWindowInsets.current
         .only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)
         .asPaddingValues()
 
-    var editing by remember { mutableStateOf(false) } // Biến trạng thái để theo dõi chế độ chỉnh sửa tab
+    var editing by remember { mutableStateOf(false) }
 
-    // Nếu đang chỉnh sửa tab, hiển thị hộp thoại chỉnh sửa
     if (editing) DefaultDialog(
         onDismiss = { editing = false },
         horizontalPadding = 0.dp
@@ -243,8 +238,7 @@ inline fun NavigationRail(
                     text = null,
                     isChecked = tab.key !in hiddenTabs,
                     onCheckedChange = {
-                        if (!it && hiddenTabs.size == tabs.size - 1) return@SwitchSettingsEntry // Đảm bảo ít nhất một tab được hiển thị
-
+                        if (!it && hiddenTabs.size == tabs.size - 1) return@SwitchSettingsEntry
                         setHiddenTabs(if (it) hiddenTabs - tab.key else hiddenTabs + tab.key)
                     },
                     isEnabled = tab.canHide && (tab.key in hiddenTabs || hiddenTabs.size < tabs.size - 1)
@@ -253,40 +247,13 @@ inline fun NavigationRail(
         }
     }
 
-    // Hiển thị thanh điều hướng theo chiều dọc
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .verticalScroll(rememberScrollState())
             .padding(paddingValues)
     ) {
-        // Vùng chứa icon trên cùng
-        Box(
-            contentAlignment = Alignment.TopCenter,
-            modifier = Modifier
-                .size(
-                    width = if (isLandscape) Dimensions.navigationRail.widthLandscape
-                    else Dimensions.navigationRail.width,
-                    height = Dimensions.items.headerHeight
-                )
-        ) {
-            Image(
-                painter = painterResource(topIconButtonId),
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(colorPalette.textSecondary),
-                modifier = Modifier
-                    .offset(
-                        x = if (isLandscape) 0.dp else Dimensions.navigationRail.iconOffset,
-                        y = 48.dp
-                    )
-                    .clip(CircleShape)
-                    .clickable(onClick = onTopIconButtonClick)
-                    .padding(all = 12.dp)
-                    .size(22.dp)
-            )
-        }
-
-        // Hiển thị danh sách các tab
+        // Loại bỏ phần hiển thị nút Settings, Music, và Podcast
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
@@ -310,7 +277,6 @@ inline fun NavigationRail(
                         if (it == index) colorPalette.text else colorPalette.textDisabled
                     }
 
-                    // Nội dung của icon tab
                     val iconContent: @Composable () -> Unit = {
                         Image(
                             painter = painterResource(tab.icon),
@@ -327,7 +293,6 @@ inline fun NavigationRail(
                         )
                     }
 
-                    // Nội dung của tiêu đề tab
                     val textContent: @Composable () -> Unit = {
                         BasicText(
                             text = tab.title(),
@@ -341,7 +306,6 @@ inline fun NavigationRail(
                         )
                     }
 
-                    // Xử lý sự kiện nhấn tab
                     val contentModifier = Modifier
                         .clip(24.dp.roundedShape)
                         .combinedClickable(
@@ -349,7 +313,6 @@ inline fun NavigationRail(
                             onLongClick = { editing = true }
                         )
 
-                    // Hiển thị theo hướng dọc hoặc ngang tùy vào chế độ landscape
                     if (isLandscape) Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = contentModifier
@@ -371,14 +334,13 @@ inline fun NavigationRail(
     }
 }
 
-// Modifier giúp xoay layout theo hướng dọc nếu `enabled` bật.
 fun Modifier.vertical(enabled: Boolean = true) =
     if (enabled)
         layout { measurable, constraints ->
             val placeable = measurable.measure(constraints.copy(maxWidth = Int.MAX_VALUE))
             layout(placeable.height, placeable.width) {
                 placeable.place(
-                    x = -(placeable.width / 2 - placeable.height / 2), // Dịch chuyển vị trí để phù hợp với xoay dọc.
+                    x = -(placeable.width / 2 - placeable.height / 2),
                     y = -(placeable.height / 2 - placeable.width / 2)
                 )
             }

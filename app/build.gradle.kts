@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.ksp)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -45,7 +46,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+//            applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
             manifestPlaceholders["appName"] = "ViTune Debug"
         }
@@ -176,6 +177,7 @@ dependencies {
     implementation(libs.slf4j)
     implementation(libs.logback)
 
+
     implementation(projects.providers.github)
     implementation(projects.providers.innertube)
     implementation(projects.providers.kugou)
@@ -189,4 +191,9 @@ dependencies {
     detektPlugins(libs.detekt.compose)
     detektPlugins(libs.detekt.formatting)
     debugImplementation(libs.ui.tooling)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.auth)
+    implementation(libs.google.services)
 }

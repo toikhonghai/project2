@@ -7,9 +7,10 @@ import kotlinx.serialization.Serializable
 // Chứa thông tin về yêu cầu tiếp theo trong quá trình phát nhạc trên YouTube Music.
 data class NextBody(
     val context: Context = Context.DefaultWeb,
-    val videoId: String?,
+    val videoId: String? = null,
     val isAudioOnly: Boolean = true, // chỉ định rằng yêu cầu này là để phát nhạc
     val playlistId: String? = null,
+    val browseId: String? = null,   // Added browseId field
     val tunerSettingValue: String = "AUTOMIX_SETTING_NORMAL",
     val index: Int? = null,
     val params: String? = null,

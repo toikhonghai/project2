@@ -7,5 +7,5 @@ import kotlinx.serialization.Serializable
 data class SearchBody( // Lớp này được sử dụng để tạo ra một yêu cầu tìm kiếm đến API của YouTube
     val context: Context = Context.DefaultWeb,
     val query: String,
-    val params: String
+    val params: String? = null
 )

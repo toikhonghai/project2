@@ -3,18 +3,25 @@ package app.vitune.android.ui.screens
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import androidx.media3.common.util.Log
 import app.vitune.android.Database
 import app.vitune.android.LocalPlayerServiceBinder
 import app.vitune.android.R
 import app.vitune.android.handleUrl
 import app.vitune.android.models.Mood
+import app.vitune.android.models.PodcastPlaylist
 import app.vitune.android.models.SearchQuery
 import app.vitune.android.preferences.DataPreferences
 import app.vitune.android.query
+import app.vitune.android.ui.screens.account.AccountSettingsScreen
+import app.vitune.android.ui.screens.account.LoginScreen
+import app.vitune.android.ui.screens.account.RegisterScreen
 import app.vitune.android.ui.screens.album.AlbumScreen
 import app.vitune.android.ui.screens.artist.ArtistScreen
+import app.vitune.android.ui.screens.home.HomeScreen
 import app.vitune.android.ui.screens.pipedplaylist.PipedPlaylistScreen
 import app.vitune.android.ui.screens.playlist.PlaylistScreen
+import app.vitune.android.ui.screens.podcast.PodcastDetailScreen
 import app.vitune.android.ui.screens.search.SearchScreen
 import app.vitune.android.ui.screens.searchresult.SearchResultScreen
 import app.vitune.android.ui.screens.settings.LogsScreen
@@ -45,10 +52,15 @@ val logsRoute = Route0("logsRoute")
 val pipedPlaylistRoute = Route3<String, String, String>("pipedPlaylistRoute")
 val playlistRoute = Route4<String, String?, Int?, Boolean>("playlistRoute")
 val moodRoute = Route1<Mood>("moodRoute")
+val podcastRoute = Route1<String>("podcastRoute")
 val searchResultRoute = Route1<String>("searchResultRoute")
 val searchRoute = Route1<String>("searchRoute")
 val settingsRoute = Route0("settingsRoute")
-
+val podcastPlaylistRoute = Route1<PodcastPlaylist>("podcastPlaylistRoute")
+val loginRoute = Route0("loginRoute")
+val registerRoute = Route0("registerRoute")
+val homeRoute = Route0("homeRoute")
+val accountSettingsRoute = Route0("accountSettingsRoute")
 @Composable
 fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng cho RouteHandlerScope để định nghĩa các route toàn cục.
 
@@ -68,6 +80,37 @@ fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng 
     // Khi gọi logsRoute(), hiển thị màn hình Logs
     logsRoute {
         LogsScreen()
+    }
+
+    homeRoute {
+        HomeScreen()
+    }
+
+    loginRoute {
+        LoginScreen(
+            onLoginSuccess = {
+                replace(homeRoute) // Chuyển đến homeRoute thay vì replace(null)
+            },
+            onNavigateToRegister = {
+                replace(registerRoute)
+            }
+        )
+    }
+
+    registerRoute {
+        RegisterScreen(
+            onRegisterSuccess = {
+                replace(homeRoute) // Chuyển đến homeRoute thay vì replace(null)
+            },
+            onNavigateToLogin = {
+                replace(loginRoute)
+            }
+        )
+    }
+
+    accountSettingsRoute {
+        Log.d("HomeScreen", "Account icon clicked, navigating to AccountSettingsScreen")
+        AccountSettingsScreen()
     }
 
     // Khi gọi pipedPlaylistRoute(apiBaseUrl, sessionToken, playlistId), hiển thị màn hình playlist từ dịch vụ Piped
@@ -95,6 +138,9 @@ fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng 
     // Khi gọi settingsRoute(), hiển thị màn hình cài đặt
     settingsRoute {
         SettingsScreen()
+    }
+    podcastRoute { browseId ->
+        PodcastDetailScreen(browseId = browseId)
     }
 
     // Khi gọi searchRoute(initialTextInput), hiển thị màn hình tìm kiếm với input ban đầu là initialTextInput

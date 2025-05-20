@@ -17,6 +17,7 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import java.io.EOFException
+import java.io.IOException
 import kotlin.math.pow
 
 class RangeHandlerDataSourceFactory(private val parent: DataSource.Factory) : DataSource.Factory {
@@ -26,13 +27,14 @@ class RangeHandlerDataSourceFactory(private val parent: DataSource.Factory) : Da
         }.getOrElse { e ->
             if (
                 e.findCause<EOFException>() != null ||
-                e.findCause<InvalidResponseCodeException>()?.responseCode == 416
+                e.findCause<InvalidResponseCodeException>()?.responseCode == 416 ||
+                e.findCause<InvalidResponseCodeException>()?.responseCode == 403
             ) parent.open(
                 dataSpec
                     .buildUpon()
                     .setHttpRequestHeaders(
                         dataSpec.httpRequestHeaders.filter {
-                            it.key.equals("range", ignoreCase = true)
+                            !it.key.equals("range", ignoreCase = true)
                         }
                     )
                     .setLength(C.LENGTH_UNSET.toLong())
@@ -54,13 +56,13 @@ class CatchingDataSourceFactory(
             parent.open(dataSpec)
         }.getOrElse { ex ->
             ex.printStackTrace()
-
+            onError?.invoke(ex)
             if (ex is PlaybackException) throw ex
             else throw PlaybackException(
                 /* message = */ "Unknown playback error",
                 /* cause = */ ex,
                 /* errorCode = */ PlaybackException.ERROR_CODE_UNSPECIFIED
-            ).also { onError?.invoke(it) }
+            )
         }
     }
 
@@ -121,7 +123,6 @@ class RetryingDataSourceFactory(
             while (retries < maxRetries) {
                 if (retries > 0) Log.d(TAG, "Retry $retries of $maxRetries fetching datasource")
 
-                @Suppress("TooGenericExceptionCaught")
                 return try {
                     parent.open(dataSpec)
                 } catch (ex: Throwable) {
@@ -132,23 +133,17 @@ class RetryingDataSourceFactory(
                         /* tr = */ ex
                     )
                     if (predicate(ex)) {
-                        val time = if (exponential) 1000L * 2.0.pow(retries).toLong() else 2500L
+                        val time = if (exponential) 1000L * 2.0.pow(retries).toLong() else 1000L
                         Log.d(TAG, "Retry policy accepted retry, sleeping for $time milliseconds")
                         Thread.sleep(time)
                         retries++
                         continue
                     }
-                    Log.e(
-                        TAG,
-                        "Retry policy declined retry, throwing the last exception..."
-                    )
+                    Log.e(TAG, "Retry policy declined retry, throwing the last exception...")
                     throw ex
                 }
             }
-            Log.e(
-                TAG,
-                "Max retries $maxRetries exceeded, throwing the last exception..."
-            )
+            Log.e(TAG, "Max retries $maxRetries exceeded, throwing the last exception...")
             throw lastException!!
         }
     }

@@ -19,7 +19,11 @@ data class Song(
     @ColumnInfo(defaultValue = "false") // Đánh dấu trường này là không có giá trị mặc định
     val blacklisted: Boolean = false, // Đánh dấu bài hát là bị chặn (blacklisted)
     @ColumnInfo(defaultValue = "false") // Đánh dấu trường này là không có giá trị mặc định
-    val explicit: Boolean = false // Đánh dấu bài hát là có nội dung nhạy cảm (explicit)
+    val explicit: Boolean = false, // Đánh dấu bài hát là có nội dung nhạy cảm (explicit)
+    @ColumnInfo(defaultValue = "false") // Thêm cột mới
+    val isDownloaded: Boolean = false,
+    @ColumnInfo(defaultValue = "NULL") // Thêm cột mới
+    val downloadPath: String? = null
 ) {
     fun toggleLike() = copy(likedAt = if (likedAt == null) System.currentTimeMillis() else null) // Hàm này sẽ sao chép đối tượng hiện tại và thay đổi trạng thái likedAt
 }

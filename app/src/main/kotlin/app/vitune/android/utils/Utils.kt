@@ -4,6 +4,7 @@ package app.vitune.android.utils
 
 import android.content.ContentUris
 import android.net.Uri
+import android.os.Bundle
 import android.provider.MediaStore
 import android.text.format.DateUtils
 import androidx.annotation.OptIn
@@ -12,14 +13,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import app.vitune.android.R
+import app.vitune.android.models.PodcastEntity
 import app.vitune.android.models.Song
 import app.vitune.android.preferences.AppearancePreferences
 import app.vitune.android.service.LOCAL_KEY_PREFIX
+import app.vitune.android.service.PlayerService
 import app.vitune.android.service.isLocal
 import app.vitune.core.ui.utils.SongBundleAccessor
 import app.vitune.providers.innertube.Innertube
+import app.vitune.providers.innertube.models.NavigationEndpoint
 import app.vitune.providers.innertube.models.bodies.ContinuationBody
 import app.vitune.providers.innertube.requests.playlistPage
 import app.vitune.providers.piped.models.Playlist
@@ -28,6 +33,55 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlin.time.Duration
+
+// Kiểm tra xem queue hiện tại có phải là podcast queue không
+private fun Player.isPodcastQueue(): Boolean {
+    return (0 until mediaItemCount).any { index ->
+        getMediaItemAt(index).mediaMetadata.extras?.getBoolean("isPodcast") == true
+    }
+}
+
+// Phát một MediaItem, đảm bảo loại phù hợp với queue
+fun PlayerService.Binder.forcePlay(mediaItem: MediaItem) {
+    val player = player
+    val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
+    if (player.isPodcastQueue() != isPodcast) {
+        player.clearMediaItems()
+    }
+    player.setMediaItem(mediaItem, true)
+    player.playWhenReady = true
+    player.prepare()
+}
+
+// Thêm MediaItem vào cuối queue, đảm bảo loại phù hợp
+fun PlayerService.Binder.enqueue(mediaItem: MediaItem) {
+    val player = player
+    val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
+    if (player.isPodcastQueue() == isPodcast) {
+        when (player.playbackState) {
+            Player.STATE_IDLE, Player.STATE_ENDED -> forcePlay(mediaItem)
+            else -> player.addMediaItem(player.mediaItemCount, mediaItem)
+        }
+    }
+}
+
+// Thêm MediaItem vào vị trí tiếp theo, đảm bảo loại phù hợp
+fun PlayerService.Binder.addNext(mediaItem: MediaItem) {
+    val player = player
+    val isPodcast = mediaItem.mediaMetadata.extras?.getBoolean("isPodcast") == true
+    if (player.isPodcastQueue() == isPodcast) {
+        when (player.playbackState) {
+            Player.STATE_IDLE, Player.STATE_ENDED -> forcePlay(mediaItem)
+            else -> player.addMediaItem(player.currentMediaItemIndex + 1, mediaItem)
+        }
+    }
+}
+
+// Thiết lập radio (chỉ cho music)
+fun PlayerService.Binder.setupRadio(endpoint: NavigationEndpoint.Endpoint.Watch?) {
+    if (player.isPodcastQueue()) return // Không setup radio cho podcast queue
+    // Logic setup radio hiện tại
+}
 
 val Innertube.SongItem.asMediaItem: MediaItem
     get() = MediaItem.Builder()
@@ -216,4 +270,63 @@ inline fun <reified T : Throwable> Throwable.findCause(): T? {
     }
 
     return null
+}
+
+fun PodcastEntity.asMediaItem(): MediaItem {
+    val metadata = MediaMetadata.Builder()
+        .setTitle(title)
+        .setArtist(authorName)
+        .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
+        .setExtras(android.os.Bundle().apply {
+            putString("podcastId", browseId)
+            putBoolean("isPodcast", true) // Thêm isPodcast để nhận diện
+        })
+        .build()
+
+    return MediaItem.Builder()
+        .setMediaId(browseId)
+        .setUri("podcast:$browseId")
+        .setMediaMetadata(metadata)
+        .build()
+}
+
+fun Innertube.PodcastItem.asMediaItem(): MediaItem {
+    val metadata = MediaMetadata.Builder()
+        .setTitle(info?.name)
+        .setArtist(authors?.joinToString { it.name ?: "" })
+        .setArtworkUri(thumbnail?.url?.let { Uri.parse(it) })
+        .setExtras(android.os.Bundle().apply {
+            putString("podcastId", info?.endpoint?.browseId)
+            putBoolean("isPodcast", true) // Thêm isPodcast để nhận diện
+        })
+        .build()
+
+    return MediaItem.Builder()
+        .setMediaId(info?.endpoint?.browseId ?: "unknown")
+        .setUri("podcast:${info?.endpoint?.browseId}")
+        .setMediaMetadata(metadata)
+        .build()
+}
+
+fun Innertube.PodcastEpisodeItem.asMediaItem(): MediaItem {
+    val videoId = info?.endpoint?.videoId.orEmpty()
+    val metadata = MediaMetadata.Builder()
+        .setTitle(info?.name.orEmpty())
+        .setArtist(podcast?.name.orEmpty())
+        .setArtworkUri(thumbnail?.url?.let { Uri.parse(it) })
+        .setExtras(
+            Bundle().apply {
+                putString("durationText", durationText)
+                putBoolean("isPodcast", true)
+                putString("podcastId", podcast?.endpoint?.browseId.orEmpty())
+            }
+        )
+        .build()
+
+    return MediaItem.Builder()
+        .setMediaId(videoId)
+        .setUri("https://www.youtube.com/watch?v=$videoId")
+        .setMediaMetadata(metadata)
+        .setCustomCacheKey(videoId)
+        .build()
 }

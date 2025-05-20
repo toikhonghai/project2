@@ -126,8 +126,8 @@ fun TextFieldDialog(
             text = doneText,
             onClick = {
                 if (isTextInputValid(value)) {
-                    onDismiss()
                     onAccept(value)
+                    onDismiss()
                 }
             }
         )
@@ -436,45 +436,6 @@ fun SliderDialog(
                 onClick = onDismiss,
                 modifier = Modifier
             )
-        }
-    }
-}
-
-@Preview(
-    name = "Dialog",
-    showSystemUi = true,
-    device = Devices.PIXEL_4_XL
-)
-@Composable
-fun DialogPreview() {
-    val colorPalette = defaultLightPalette
-    val typography = typographyOf(
-        color = colorPalette.text,
-        fontFamily = BuiltInFontFamily.System,
-        applyFontPadding = false
-    )
-    val appearance = Appearance(
-        colorPalette = colorPalette,
-        typography = typography,
-        thumbnailShapeCorners = 8.dp
-    )
-
-    CompositionLocalProvider(LocalAppearance provides appearance) {
-        Surface(
-            color = colorPalette.background1,
-            shape = 8.dp.roundedShape
-        ) {
-            DefaultDialog(
-                onDismiss = { },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                horizontalPadding = 24.dp
-            ) {
-                // Use direct copy instead of extension
-                BasicText(
-                    text = "Hehe",
-                    style = typography.xs.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
         }
     }
 }

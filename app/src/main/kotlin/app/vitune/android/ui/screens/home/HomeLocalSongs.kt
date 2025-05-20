@@ -66,67 +66,52 @@ else
 @Route
 @Composable
 fun HomeLocalSongs(onSearchClick: () -> Unit) = with(OrderPreferences) {
-    val context = LocalContext.current // Lấy Context hiện tại
+    val context = LocalContext.current
     val (_, typography) = LocalAppearance.current
 
-    // Trạng thái kiểm tra quyền truy cập
     var hasPermission by remember(isCompositionLaunched()) {
-        mutableStateOf(context.applicationContext.hasPermission(permission)) // Kiểm tra permission ban đầu
+        mutableStateOf(context.applicationContext.hasPermission(permission))
     }
 
-    // Bộ xử lý yêu cầu quyền truy cập
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-        onResult = { hasPermission = it } // Cập nhật trạng thái nếu người dùng cấp quyền
+        onResult = { hasPermission = it }
     )
 
-    // Nếu đã có quyền thì bắt đầu thu thập nhạc nội bộ (sử dụng flow)
-    LaunchedEffect(hasPermission) {
-        if (hasPermission) context.musicFilesAsFlow().collect()
-    }
-
     if (hasPermission) {
-        // Giao diện hiển thị bài hát cục bộ nếu đã cấp quyền
         HomeSongs(
-            onSearchClick = onSearchClick, // Hành động tìm kiếm
+            onSearchClick = onSearchClick,
             songProvider = {
-                Database.songs(
-                    sortBy = localSongSortBy, // Tiêu chí sắp xếp
-                    sortOrder = localSongSortOrder, // Thứ tự sắp xếp
-                    isLocal = true // Chỉ lấy nhạc nội bộ
-                ).map { songs ->
-                    songs.filter { it.durationText != "0:00" } // Bỏ bài hát không có thời lượng
+                Database.getDownloadedSongs().map { songs ->
+                    songs.filter { it.durationText != "0:00" }
                 }
             },
             sortBy = localSongSortBy,
             setSortBy = { localSongSortBy = it },
             sortOrder = localSongSortOrder,
             setSortOrder = { localSongSortOrder = it },
-            title = stringResource(R.string.local) // Tiêu đề màn hình
+            title = stringResource(R.string.local)
         )
     } else {
-        // Nếu chưa có quyền → yêu cầu cấp quyền
         LaunchedEffect(Unit) { launcher.launch(permission) }
 
-        // Giao diện hiển thị khi bị từ chối quyền truy cập
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             BasicText(
-                text = stringResource(R.string.media_permission_declined), // Thông báo không có quyền
+                text = stringResource(R.string.media_permission_declined),
                 modifier = Modifier.fillMaxWidth(0.75f),
                 style = typography.m.medium
             )
             Spacer(modifier = Modifier.height(12.dp))
-            // Nút mở cài đặt ứng dụng để cấp quyền thủ công
             SecondaryTextButton(
                 text = stringResource(R.string.open_settings),
                 onClick = {
                     context.startActivity(
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            setData(Uri.fromParts("package", context.packageName, null)) // Mở trang chi tiết ứng dụng
+                            setData(Uri.fromParts("package", context.packageName, null))
                         }
                     )
                 }
@@ -134,56 +119,4 @@ fun HomeLocalSongs(onSearchClick: () -> Unit) = with(OrderPreferences) {
         }
     }
 }
-
-// Tạo một CoroutineScope dành riêng cho việc xử lý MediaStore, chạy trên luồng IO.
-private val mediaScope = CoroutineScope(Dispatchers.IO + CoroutineName("MediaStore worker"))
-
-/**
- * Trả về một StateFlow danh sách các bài hát (Song) lấy từ MediaStore (thư viện nhạc nội bộ).
- */
-fun Context.musicFilesAsFlow(): StateFlow<List<Song>> = flow {
-    var version: String? = null // Biến dùng để theo dõi version của MediaStore, để phát hiện thay đổi.
-
-    while (currentCoroutineContext().isActive) { // Lặp liên tục khi coroutine còn hoạt động
-        val newVersion = MediaStore.getVersion(applicationContext) // Lấy version mới nhất của MediaStore
-
-        if (version != newVersion) { // Nếu version thay đổi → dữ liệu đã thay đổi
-            version = newVersion
-
-            // Truy vấn danh sách nhạc từ MediaStore
-            AudioMediaCursor.query(contentResolver) {
-                buildList {
-                    while (next()) { // Duyệt qua từng dòng trong Cursor
-                        if (!isMusic || duration == 0) continue // Bỏ qua nếu không phải bài hát hoặc độ dài bằng 0
-
-                        add(
-                            Song(
-                                id = "$LOCAL_KEY_PREFIX$id", // Tạo ID duy nhất cho bài hát
-                                title = name, // Tên bài hát
-                                artistsText = artist, // Tên nghệ sĩ
-                                durationText = duration.milliseconds.toComponents { minutes, seconds, _ ->
-                                    "$minutes:${seconds.toString().padStart(2, '0')}" // Chuyển duration thành chuỗi "mm:ss"
-                                },
-                                thumbnailUrl = albumUri.toString() // Ảnh đại diện album
-                            )
-                        )
-                    }
-                }
-            }?.let { emit(it) } // Nếu có kết quả thì emit (phát) danh sách ra flow
-        }
-
-        delay(5.seconds) // Đợi 5 giây trước khi kiểm tra lại để tránh spam CPU
-    }
-}
-    .distinctUntilChanged() // Chỉ emit khi danh sách bài hát thực sự thay đổi
-    .onEach { songs -> // Mỗi lần danh sách thay đổi thì lưu vào cơ sở dữ liệu
-        transaction {
-            songs.forEach(Database::insert) // Lưu từng bài hát
-        }
-    }
-    .stateIn( // Biến flow thành StateFlow để giữ trạng thái và chia sẻ
-        mediaScope, // CoroutineScope đã tạo ở trên
-        SharingStarted.Eagerly, // Bắt đầu chia sẻ ngay khi có subscriber
-        listOf() // Giá trị khởi tạo là danh sách rỗng
-    )
 
