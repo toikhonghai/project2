@@ -715,9 +715,7 @@ interface Database {
                 publishedTimeText = null
             )
             // Use runBlocking to call suspend function in a synchronous context
-            runBlocking(Dispatchers.IO) {
-                insertEpisode(episode)
-            }
+            insertEpisode(episode)
             return
         }
 
@@ -825,7 +823,7 @@ interface Database {
     fun getSubscribedPodcasts(): Flow<List<PodcastEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertEpisode(episode: PodcastEpisodeEntity)
+    fun insertEpisode(episode: PodcastEpisodeEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEpisodes(episodes: List<PodcastEpisodeEntity>)
@@ -852,13 +850,7 @@ interface Database {
     @Query("SELECT * FROM podcast_episodes WHERE videoId = :videoId")
     suspend fun getEpisodeById(videoId: String): PodcastEpisodeEntity?
 
-    @Query(
-        """
-        SELECT * FROM podcast_episodes 
-        WHERE podcastId = :podcastId 
-        ORDER BY CASE WHEN lastPlayed IS NULL THEN 1 ELSE 0 END, lastPlayed DESC
-        """
-    )
+    @Query("SELECT * FROM podcast_episodes WHERE podcastId = :podcastId ORDER BY lastPlayed DESC LIMIT 100")
     fun getEpisodesForPodcast(podcastId: String): PagingSource<Int, PodcastEpisodeEntity>
 
     @Query(

@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,8 @@ import app.vitune.android.ui.components.themed.SecondaryTextButton
 import app.vitune.android.ui.items.PodcastEpisodeItem
 import app.vitune.android.ui.items.SongItemPlaceholder
 import app.vitune.android.ui.screens.GlobalRoutes
+import app.vitune.android.utils.asMediaItem
+import app.vitune.android.utils.forcePlay
 import app.vitune.android.utils.secondary
 import app.vitune.android.utils.semiBold
 import app.vitune.android.utils.toast
@@ -356,8 +359,13 @@ fun PodcastDetailScreen(
                     }
 
                     item(key = "episodesHeader") {
+                        val episodeCount = podcast?.episodeCount ?: episodes?.size ?: 0
                         BasicText(
-                            text = stringResource(R.string.episodes),
+                            text = pluralStringResource(
+                                R.plurals.podcast_episode_count_plural,
+                                episodeCount,
+                                episodeCount
+                            ),
                             style = typography.m.semiBold,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
@@ -393,105 +401,40 @@ fun PodcastDetailScreen(
                                 onClick = {
                                     scope.launch {
                                         try {
-                                            // Kiểm tra và cập nhật episode trong database
-                                            if (!Database.episodeExists(episode.videoId)) {
-                                                Database.insertEpisode(episode)
-                                                Log.d(
-                                                    "PodcastDetailScreen",
-                                                    "Inserted new episode: ${episode.title}"
-                                                )
-                                            } else {
-                                                Database.updateEpisodeMetadata(
-                                                    videoId = episode.videoId,
-                                                    title = episode.title,
-                                                    description = episode.description,
-                                                    thumbnailUrl = episode.thumbnailUrl,
-                                                    durationText = episode.durationText,
-                                                    publishedTimeText = episode.publishedTimeText
-                                                )
-                                                Log.d(
-                                                    "PodcastDetailScreen",
-                                                    "Updated metadata for episode: ${episode.title}"
-                                                )
-                                            }
-
-                                            // Lấy playlistId từ podcast
-                                            val playlistId = podcast?.playlistId
-                                            if (playlistId != null) {
-                                                val allEpisodes =
-                                                    Innertube.loadPodcastEpisodesNext(playlistId)
-                                                        ?.getOrNull()
-                                                        ?.items
-                                                        ?.map { apiEpisode ->
-                                                            PodcastEpisodeEntity.fromPodcastEpisodeItem(
-                                                                apiEpisode,
-                                                                browseId
-                                                            )
-                                                        } ?: emptyList()
-
-                                                allEpisodes.forEach { Database.insertEpisode(it) }
-
-                                                val mediaItems =
-                                                    allEpisodes.map { it.asMediaItem() }
-                                                binder?.let { binder ->
-                                                    binder.stopRadio()
-                                                    binder.player.clearMediaItems()
-                                                    binder.player.addMediaItems(mediaItems)
-                                                    val index =
-                                                        mediaItems.indexOfFirst { it.mediaId == episode.videoId }
-                                                    if (index >= 0) {
-                                                        binder.player.seekTo(
-                                                            index,
-                                                            episode.playPositionMs
+                                            binder?.let {
+                                                withContext(Dispatchers.Main) {
+                                                    it.stopRadio()
+                                                    val mediaItem = episode.asMediaItem()
+                                                    it.player.forcePlay(mediaItem)
+                                                    it.setupRadio(
+                                                        NavigationEndpoint.Endpoint.Watch(videoId = episode.videoId)
+                                                    )
+                                                    // Xếp hàng các tập liên quan
+                                                    val playlistId = podcast?.playlistId
+                                                    if (playlistId != null) {
+                                                        val episodesPage = Innertube.loadPodcastEpisodesNext(playlistId)?.getOrNull()
+                                                        val mediaItems = episodesPage?.items?.map { it.asMediaItem() } ?: emptyList()
+                                                        it.player.addMediaItems(mediaItems)
+                                                        Log.d(
+                                                            "PodcastDetailScreen",
+                                                            "Playing podcast episode: ${episode.title} with queue of ${mediaItems.size} episodes"
                                                         )
                                                     } else {
-                                                        binder.player.addMediaItem(episode.asMediaItem())
-                                                        binder.player.seekTo(
-                                                            mediaItems.size,
-                                                            episode.playPositionMs
+                                                        Log.d(
+                                                            "PodcastDetailScreen",
+                                                            "Playing single podcast episode: ${episode.title}"
                                                         )
                                                     }
-                                                    binder.player.prepare()
-                                                    binder.player.play()
-                                                    Log.d(
-                                                        "PodcastDetailScreen",
-                                                        "Playing podcast episode: ${episode.title} with queue of ${mediaItems.size} episodes"
-                                                    )
-                                                } ?: run {
-                                                    context.toast("Player service is not available")
-                                                    Log.e(
-                                                        "PodcastDetailScreen",
-                                                        "PlayerService binder is null"
-                                                    )
                                                 }
-                                            } else {
-                                                binder?.let { binder ->
-                                                    val mediaItem = episode.asMediaItem()
-                                                    binder.stopRadio()
-                                                    binder.player.clearMediaItems()
-                                                    binder.player.addMediaItem(mediaItem)
-                                                    binder.player.seekTo(episode.playPositionMs)
-                                                    binder.player.prepare()
-                                                    binder.player.play()
-                                                    Log.d(
-                                                        "PodcastDetailScreen",
-                                                        "Playing single podcast episode: ${episode.title}"
-                                                    )
-                                                } ?: run {
-                                                    context.toast("Player service is not available")
-                                                    Log.e(
-                                                        "PodcastDetailScreen",
-                                                        "PlayerService binder is null"
-                                                    )
-                                                }
+                                            } ?: withContext(Dispatchers.Main) {
+                                                context.toast("Player service is not available")
+                                                Log.e("PodcastDetailScreen", "PlayerService binder is null")
                                             }
                                         } catch (e: Exception) {
-                                            context.toast("Failed to play podcast: ${e.message}")
-                                            Log.e(
-                                                "PodcastDetailScreen",
-                                                "Error playing podcast episode: ${e.message}",
-                                                e
-                                            )
+                                            withContext(Dispatchers.Main) {
+                                                context.toast("Failed to play podcast: ${e.message}")
+                                                Log.e("PodcastDetailScreen", "Error playing podcast episode: ${e.message}", e)
+                                            }
                                         }
                                     }
                                 },

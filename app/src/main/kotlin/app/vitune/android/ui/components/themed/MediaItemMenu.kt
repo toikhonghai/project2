@@ -53,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.Log
 import app.vitune.android.Database
 import app.vitune.android.LocalPlayerServiceBinder
 import app.vitune.android.R
@@ -64,6 +65,7 @@ import app.vitune.android.models.PodcastPlaylist
 import app.vitune.android.models.Song
 import app.vitune.android.models.SongPlaylistMap
 import app.vitune.android.query
+import app.vitune.android.service.DownloadService
 import app.vitune.android.service.PrecacheService
 import app.vitune.android.service.isLocal
 import app.vitune.android.transaction
@@ -89,7 +91,9 @@ import app.vitune.core.ui.favoritesIcon
 import app.vitune.core.ui.utils.px
 import app.vitune.core.ui.utils.roundedShape
 import app.vitune.core.ui.utils.songBundle
+import app.vitune.providers.innertube.Innertube
 import app.vitune.providers.innertube.models.NavigationEndpoint
+import app.vitune.providers.innertube.requests.getPodcastStreamUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -196,14 +200,22 @@ fun NonQueuedMediaItemMenu(
             {
                 coroutineScope.launch(Dispatchers.IO) {
                     try {
-                        Database.insert(mediaItem)
-                        PrecacheService.scheduleCache(context.applicationContext, mediaItem)
+                        val song = Database.getDownloadedSongs().first().find { it.id == mediaItem.mediaId }
+                        song?.downloadPath?.let { path ->
+                            File(path).delete()
+                        }
+                        Database.updateSongDownloadStatus(
+                            songId = mediaItem.mediaId,
+                            isDownloaded = false,
+                            downloadPath = null
+                        )
                         withContext(Dispatchers.Main) {
-                            context.toast("Song download started")
+                            context.toast("Đã xóa bài hát đã tải")
                         }
                     } catch (e: Exception) {
+                        Log.e("NonQueuedMediaItemMenu", "Xóa bài hát đã tải thất bại: ${e.message}", e)
                         withContext(Dispatchers.Main) {
-                            context.toast("Failed to download song: ${e.message}")
+                            context.toast("Xóa bài hát đã tải thất bại: ${e.message}")
                         }
                     }
                 }
@@ -223,11 +235,12 @@ fun NonQueuedMediaItemMenu(
                             downloadPath = null
                         )
                         withContext(Dispatchers.Main) {
-                            context.toast("Song download deleted")
+                            context.toast("Đã xóa bài hát đã tải")
                         }
                     } catch (e: Exception) {
+                        Log.e("NonQueuedMediaItemMenu", "Xóa bài hát đã tải thất bại: ${e.message}", e)
                         withContext(Dispatchers.Main) {
-                            context.toast("Failed to delete song download: ${e.message}")
+                            context.toast("Xóa bài hát đã tải thất bại: ${e.message}")
                         }
                     }
                 }
@@ -1165,6 +1178,8 @@ fun PodcastEpisodeMenu(
                     onDismiss()
                     coroutineScope.launch(Dispatchers.IO) {
                         try {
+                            val streamUrl = Innertube.getPodcastStreamUrl(mediaItem.mediaId)
+                                ?: throw Exception("Không tìm thấy URL luồng podcast")
                             if (!Database.episodeExists(mediaItem.mediaId)) {
                                 Database.insertEpisode(
                                     PodcastEpisodeEntity(
@@ -1172,19 +1187,20 @@ fun PodcastEpisodeMenu(
                                         podcastId = mediaItem.mediaMetadata.extras?.getString("podcastId") ?: "",
                                         title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
                                         thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
-                                        durationText = mediaItem.mediaMetadata.extras?.getString("durationText"),
+                                        durationText = mediaItem.mediaMetadata.extras?.getString("durationText") ?: "0:00",
                                         description = null,
                                         publishedTimeText = null
                                     )
                                 )
                             }
-                            PrecacheService.scheduleCache(context.applicationContext, mediaItem)
+                            DownloadService.startDownload(context.applicationContext, mediaItem.mediaId, streamUrl)
                             withContext(Dispatchers.Main) {
-                                context.toast("Podcast download started")
+                                context.toast("Đã bắt đầu tải podcast")
                             }
                         } catch (e: Exception) {
+                            Log.e("PodcastEpisodeMenu", "Tải podcast thất bại: ${e.message}", e)
                             withContext(Dispatchers.Main) {
-                                context.toast("Failed to download podcast: ${e.message}")
+                                context.toast("Tải podcast thất bại: ${e.message}")
                             }
                         }
                     }
@@ -1208,11 +1224,12 @@ fun PodcastEpisodeMenu(
                                 downloadPath = null
                             )
                             withContext(Dispatchers.Main) {
-                                context.toast("Podcast download deleted")
+                                context.toast("Đã xóa podcast đã tải")
                             }
                         } catch (e: Exception) {
+                            Log.e("PodcastEpisodeMenu", "Xóa podcast đã tải thất bại: ${e.message}", e)
                             withContext(Dispatchers.Main) {
-                                context.toast("Failed to delete podcast download: ${e.message}")
+                                context.toast("Xóa podcast đã tải thất bại: ${e.message}")
                             }
                         }
                     }

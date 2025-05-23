@@ -45,6 +45,7 @@ import app.vitune.android.ui.components.themed.ConfirmationDialog
 import app.vitune.android.ui.components.themed.FloatingActionsContainerWithScrollToTop
 import app.vitune.android.ui.components.themed.HeaderIconButton
 import app.vitune.android.ui.components.themed.NonQueuedMediaItemMenu
+import app.vitune.android.ui.items.PodcastItem
 import app.vitune.android.ui.items.SongItemPlaceholder
 import app.vitune.android.ui.items.SubscribedPodcastItem
 import app.vitune.android.utils.asMediaItem
@@ -56,6 +57,9 @@ import app.vitune.compose.persist.persist
 import app.vitune.compose.persist.persistList
 import app.vitune.core.data.enums.SortOrder
 import app.vitune.core.ui.LocalAppearance
+import app.vitune.providers.innertube.Innertube
+import app.vitune.providers.innertube.models.NavigationEndpoint
+import app.vitune.providers.innertube.models.Thumbnail
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -172,17 +176,39 @@ fun SubscribedPodcastsScreen(
                             }
                         )
                     }
-                    SubscribedPodcastItem(
-                        podcastEntity = podcast,
-                        onClick = { navigationToPodcastDetail(podcast.browseId) },
-                        onMenuClick = {
-                            menuState.display {
-                                NonQueuedMediaItemMenu(
-                                    onDismiss = menuState::hide,
-                                    mediaItem = podcast.asMediaItem(),
-                                    onHideFromDatabase = { deletingPodcast = podcast }
+                    PodcastItem(
+                        podcast = Innertube.PodcastItem(
+                            info = Innertube.Info(
+                                name = podcast.title,
+                                endpoint = NavigationEndpoint.Endpoint.Browse(browseId = podcast.browseId)
+                            ),
+                            authors = listOfNotNull(podcast.authorName?.let { name ->
+                                Innertube.Info(
+                                    name = name,
+                                    endpoint = podcast.authorBrowseId?.let { browseId ->
+                                        NavigationEndpoint.Endpoint.Browse(browseId = browseId)
+                                    }
                                 )
+                            }),
+                            description = podcast.description,
+                            episodeCount = podcast.episodeCount,
+                            playlistId = podcast.playlistId,
+                            thumbnail = podcast.thumbnailUrl?.let { url ->
+                                Thumbnail(url = url, height = null, width = null)
                             }
+                        ),
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                val identifier = resolvePodcastIdentifier(podcast)
+                                if (identifier != null) {
+                                    navigationToPodcastDetail(identifier)
+                                } else {
+                                    context.toast("Unable to navigate to podcast: ${podcast.title}")
+                                }
+                            }
+                        },
+                        onMenuClick = {
+
                         },
                         modifier = Modifier
                             .fillMaxWidth()

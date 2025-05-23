@@ -13,8 +13,10 @@ import app.vitune.providers.innertube.models.Context
 import app.vitune.providers.innertube.models.ContinuationResponse
 import app.vitune.providers.innertube.models.MusicShelfRenderer
 import app.vitune.providers.innertube.models.NavigationEndpoint
+import app.vitune.providers.innertube.models.PlayerResponse
 import app.vitune.providers.innertube.models.SearchResponse
 import app.vitune.providers.innertube.models.bodies.ContinuationBody
+import app.vitune.providers.innertube.models.bodies.PlayerBody
 import app.vitune.providers.innertube.models.bodies.SearchBody
 import app.vitune.providers.innertube.utils.toItemsPage
 import app.vitune.providers.utils.runCatchingCancellable
@@ -40,39 +42,13 @@ suspend fun Innertube.searchPodcasts(query: String): Result<ItemsPage<PodcastIte
             setBody(body)
             body.context.apply()
             mask("contents.tabbedSearchResultsRenderer.tabs.tabRenderer.content.sectionListRenderer.contents.musicShelfRenderer(continuations,contents.musicResponsiveListItemRenderer(flexColumns,thumbnail,navigationEndpoint))")
-
         }.body<SearchResponse>()
 
         val items = response.contents?.tabbedSearchResultsRenderer?.tabs
             ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
             ?.flatMap { it.musicShelfRenderer?.contents.orEmpty() }
-            ?.mapNotNull { content ->
-                val renderer = content.musicResponsiveListItemRenderer ?: return@mapNotNull null
-                val titleRun = renderer.flexColumns.getOrNull(0)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()
-                val subtitleRun = renderer.flexColumns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
-                val browseEndpoint = renderer.navigationEndpoint?.browseEndpoint
-                val pageType = browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
-
-                if (pageType != "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE") return@mapNotNull null
-
-                val browseId = browseEndpoint?.browseId ?: return@mapNotNull null
-//                val playlistId = browseId.let { getPodcastPlaylistId(it) }
-                val podcastPage = browseId.let { loadPodcastPage(it)?.getOrNull() }
-                val episodeCount = podcastPage?.episodeCount ?: 0
-
-                PodcastItem(
-                    info = Info(
-                        name = titleRun?.text,
-                        endpoint = browseEndpoint
-                    ),
-                    authors = subtitleRun?.filter { it.navigationEndpoint?.browseEndpoint != null }
-                        ?.map { Info<NavigationEndpoint.Endpoint.Browse>(it) },
-                    description = subtitleRun?.joinToString("") { it.text.orEmpty() },
-                    episodeCount = episodeCount,
-                    playlistId = null,
-                    thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.firstOrNull()
-                )
-            }?.distinctBy { it.key }
+            ?.mapNotNull { parsePodcastItem(it) }
+            ?.distinctBy { it.key }
 
         logger.debug("Found ${items?.size ?: 0} podcasts for query: $query")
         ItemsPage(
@@ -81,7 +57,7 @@ suspend fun Innertube.searchPodcasts(query: String): Result<ItemsPage<PodcastIte
                 ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.continuations
                 ?.firstOrNull()?.nextContinuationData?.continuation
         )
-    }?.onFailure { logger.error("Search podcasts failed for query $query: ${it.message}", it) }
+    }?.onFailure { logger.error("Tìm kiếm kênh podcast thất bại cho truy vấn $query: ${it.message}", it) }
 
 suspend fun Innertube.searchPodcastEpisodes(query: String): Result<ItemsPage<PodcastEpisodeItem>>? =
     runCatchingCancellable {
@@ -97,34 +73,34 @@ suspend fun Innertube.searchPodcastEpisodes(query: String): Result<ItemsPage<Pod
             )
         )
 
-        logger.debug("Sending search request for query: $query")
+        logger.debug("Gửi yêu cầu tìm kiếm cho truy vấn: $query")
         val response = client.post(SEARCH) {
             setBody(body)
             body.context.apply()
             mask("contents.tabbedSearchResultsRenderer.tabs.tabRenderer.content.sectionListRenderer.contents.musicShelfRenderer(continuations,contents.$PODCAST_EPISODE_RENDERER_MASK)")
         }.body<SearchResponse>()
 
-        logger.debug("Received response with contents: ${response.contents != null}")
+        logger.debug("Nhận phản hồi với nội dung: ${response.contents != null}")
         val contents = response.contents?.tabbedSearchResultsRenderer?.tabs
             ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.contents
             ?.flatMap { it.musicShelfRenderer?.contents.orEmpty() }
             ?: emptyList()
 
-        logger.debug("Found ${contents.size} content items in musicShelfRenderer")
+        logger.debug("Tìm thấy ${contents.size} mục trong musicShelfRenderer")
         val items = contents.mapNotNull { content ->
             parsePodcastEpisode(content).also { episode ->
-                if (episode == null) logger.debug("Failed to parse content: $content")
+                if (episode == null) logger.debug("Không thể phân tích nội dung: $content")
             }
         }.distinctBy { it.key }
 
-        logger.debug("Found ${items.size} podcast episodes for query: $query")
+        logger.debug("Tìm thấy ${items.size} tập podcast cho truy vấn: $query")
         ItemsPage(
             items = items,
             continuation = response.contents?.tabbedSearchResultsRenderer?.tabs
                 ?.firstOrNull()?.tabRenderer?.content?.sectionListRenderer?.continuations
                 ?.firstOrNull()?.nextContinuationData?.continuation
         )
-    }?.onFailure { logger.error("Search podcast episodes failed for query $query: ${it.message}", it) }
+    }?.onFailure { logger.error("Tìm kiếm tập podcast thất bại cho truy vấn $query: ${it.message}", it) }
 
 suspend fun Innertube.searchPodcastEpisodesWithContinuation(
     continuationToken: String
@@ -140,13 +116,13 @@ suspend fun Innertube.searchPodcastEpisodesWithContinuation(
         ?.mapNotNull { parsePodcastEpisode(it) }
         ?.distinctBy { it.key }
 
-    logger.debug("Found ${items?.size ?: 0} podcast episodes for continuation")
+    logger.debug("Tìm thấy ${items?.size ?: 0} tập podcast cho continuation")
     ItemsPage(
         items = items,
         continuation = response.continuationContents?.musicShelfContinuation?.continuations
             ?.firstOrNull()?.nextContinuationData?.continuation
     )
-}?.onFailure { logger.error("Search podcast episodes with continuation failed: ${it.message}", it) }
+}?.onFailure { logger.error("Tìm kiếm tập podcast với continuation thất bại: ${it.message}", it) }
 
 suspend fun Innertube.searchPodcastsWithContinuation(
     continuationToken: String
@@ -164,15 +140,15 @@ suspend fun Innertube.searchPodcastsWithContinuation(
         ?.mapNotNull { parsePodcastItem(it) }
         ?.distinctBy { it.key }
 
-    logger.debug("Found ${items?.size ?: 0} podcasts for continuation")
+    logger.debug("Tìm thấy ${items?.size ?: 0} kênh podcast cho continuation")
     ItemsPage(
         items = items,
         continuation = response.continuationContents?.musicShelfContinuation?.continuations
             ?.firstOrNull()?.nextContinuationData?.continuation
     )
-}?.onFailure { logger.error("Search podcasts with continuation failed: ${it.message}", it) }
+}?.onFailure { logger.error("Tìm kiếm kênh podcast với continuation thất bại: ${it.message}", it) }
 
-private suspend fun parsePodcastItem(content: MusicShelfRenderer.Content): PodcastItem? {
+private fun parsePodcastItem(content: MusicShelfRenderer.Content): PodcastItem? {
     val renderer = content.musicResponsiveListItemRenderer ?: return null
     val flexColumns = renderer.flexColumns
 
@@ -181,32 +157,15 @@ private suspend fun parsePodcastItem(content: MusicShelfRenderer.Content): Podca
         ?.musicResponsiveListItemFlexColumnRenderer
         ?.text
         ?.runs
-        ?.firstOrNull()
-    if (titleRun == null) {
-        logger.warn("titleRun is null for renderer: $renderer")
-        return null
-    }
+        ?.firstOrNull() ?: return null
 
-    val endpoint = flexColumns
-        .getOrNull(1)
-        ?.musicResponsiveListItemFlexColumnRenderer
-        ?.text
-        ?.runs
-        ?.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
-        ?.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Browse
-        ?: renderer.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Browse
-    if (endpoint == null) {
-        logger.warn("endpoint is null or not Browse for renderer: $renderer")
-        return null
-    }
+    val endpoint = renderer.navigationEndpoint?.endpoint as? NavigationEndpoint.Endpoint.Browse
+        ?: return null
 
     val pageType = endpoint.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
     if (pageType != "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE") return null
 
     val browseId = endpoint.browseId ?: return null
-    val playlistId = browseId.let { getPodcastPlaylistId(it) }
-    val podcastPage = browseId.let { Innertube.loadPodcastPage(it)?.getOrNull() }
-    val episodeCount = podcastPage?.episodeCount ?: 0
 
     val info = Info(titleRun.text, endpoint)
 
@@ -221,14 +180,38 @@ private suspend fun parsePodcastItem(content: MusicShelfRenderer.Content): Podca
         ?.map { Info<NavigationEndpoint.Endpoint.Browse>(it) }
         ?: emptyList()
 
-    val description = authorRuns?.lastOrNull()?.text
+    val description = authorRuns?.joinToString("") { it.text.orEmpty() }
 
     return PodcastItem(
         info = info,
         authors = authors,
         description = description,
-        episodeCount = episodeCount,
-        playlistId = playlistId,
+        episodeCount = null, // Bỏ episodeCount để tránh gọi mạng
+        playlistId = null, // Không cần playlistId trong tìm kiếm
         thumbnail = renderer.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.firstOrNull()
     )
 }
+
+suspend fun Innertube.getPodcastStreamUrl(videoId: String): String? = runCatchingCancellable {
+    val body = PlayerBody(
+        videoId = videoId,
+        context = Context(
+            client = Context.Client(
+                clientName = "WEB_REMIX",
+                clientVersion = "1.20241028.01.00",
+                gl = "VN",
+                hl = "vi"
+            ),
+            user = Context.User()
+        )
+    )
+
+    val response = client.post(PLAYER) {
+        setBody(body)
+        body.context.apply()
+    }.body<PlayerResponse>()
+
+    response.streamingData?.adaptiveFormats
+        ?.firstOrNull { it.mimeType.contains("audio/mp3") || it.mimeType.contains("application/x-mpegURL") }
+        ?.url
+}?.onFailure { logger.error("Failed to get stream URL for videoId $videoId: ${it.message}", it) }?.getOrNull()

@@ -59,9 +59,9 @@ import kotlin.time.Duration.Companion.seconds
 
 // Xác định quyền truy cập phù hợp tùy theo phiên bản Android
 private val permission = if (isAtLeastAndroid13)
-    Manifest.permission.READ_MEDIA_AUDIO // Android 13+ cần quyền này để đọc audio
+    Manifest.permission.READ_MEDIA_AUDIO
 else
-    Manifest.permission.READ_EXTERNAL_STORAGE // Android <13 dùng quyền cũ
+    Manifest.permission.READ_EXTERNAL_STORAGE
 
 @Route
 @Composable
@@ -81,11 +81,7 @@ fun HomeLocalSongs(onSearchClick: () -> Unit) = with(OrderPreferences) {
     if (hasPermission) {
         HomeSongs(
             onSearchClick = onSearchClick,
-            songProvider = {
-                Database.getDownloadedSongs().map { songs ->
-                    songs.filter { it.durationText != "0:00" }
-                }
-            },
+            songProvider = { Database.getDownloadedSongs() },
             sortBy = localSongSortBy,
             setSortBy = { localSongSortBy = it },
             sortOrder = localSongSortOrder,

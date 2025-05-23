@@ -325,7 +325,7 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                                                     it.player.forcePlay(mediaItem)
                                                     it.setupRadio(episode.info?.endpoint)
 
-                                                    // Load and queue related episodes
+                                                    // Xếp hàng các tập liên quan
                                                     val podcastId = episode.podcast?.endpoint?.browseId
                                                     if (podcastId != null) {
                                                         val playlistId = getPodcastPlaylistId(podcastId)

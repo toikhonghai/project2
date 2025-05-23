@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -73,51 +74,12 @@ private fun getLastRefreshed(context: Context): Long {
         .getLong("lastRefreshed", 0L)
 }
 
-@OptIn(UnstableApi::class)
-suspend fun fetchPodcastWithEpisodeCount(podcast: Innertube.PodcastItem, context: android.content.Context): PodcastEntity {
-    val browseId = podcast.info?.endpoint?.browseId
-    if (browseId == null) {
-        Log.w("SuggestedPodcastsScreen", "Invalid browseId for podcast: ${podcast.info?.name}")
-        return PodcastEntity.fromPodcastItem(podcast.copy(episodeCount = 0))
-    }
-
-    Log.d("SuggestedPodcastsScreen", "Fetching episode count for podcast: ${podcast.info?.name}, browseId: $browseId")
-    return Innertube.loadPodcastPage(browseId)?.onSuccess { podcastPage ->
-        val entity = PodcastEntity(
-            browseId = podcast.key,
-            title = podcastPage.title ?: podcast.info?.name ?: "",
-            description = podcastPage.description,
-            authorName = podcastPage.author?.name,
-            authorBrowseId = podcastPage.author?.endpoint?.browseId,
-            thumbnailUrl = podcastPage.thumbnail?.url,
-            episodeCount = podcastPage.episodeCount ?: 0,
-            playlistId = podcastPage.playlistId,
-            lastUpdated = System.currentTimeMillis()
-        )
-        Database.insertPodcast(entity)
-        Log.d("SuggestedPodcastsScreen", "Fetched podcast: ${podcastPage.title}, episodeCount: ${podcastPage.episodeCount}")
-    }?.getOrNull()?.let { podcastPage ->
-        PodcastEntity(
-            browseId = podcast.key,
-            title = podcastPage.title ?: podcast.info?.name ?: "",
-            description = podcastPage.description,
-            authorName = podcastPage.author?.name,
-            authorBrowseId = podcastPage.author?.endpoint?.browseId,
-            thumbnailUrl = podcastPage.thumbnail?.url,
-            episodeCount = podcastPage.episodeCount ?: 0,
-            playlistId = podcastPage.playlistId,
-            lastUpdated = System.currentTimeMillis()
-        )
-    } ?: PodcastEntity.fromPodcastItem(podcast.copy(episodeCount = 0))
-}
-
 suspend fun resolvePodcastIdentifier(podcast: PodcastEntity): String? {
     val browseId = podcast.browseId
     if (browseId.isEmpty()) {
         Log.w("SuggestedPodcastsScreen", "Podcast has no browseId: ${podcast.title}")
         return null
     }
-
     Log.d("SuggestedPodcastsScreen", "Using browseId for podcast: ${podcast.title}, browseId: $browseId")
     return browseId
 }
@@ -135,60 +97,81 @@ fun SuggestedPodcastsScreen(
     val lazyListState = rememberLazyListState()
     val (colorPalette, typography) = LocalAppearance.current
 
-    PersistMapCleanup(prefix = "podcastScreen/suggested/")
+    // Chỉ dọn dẹp khi cần làm mới hoàn toàn (ví dụ: khi thay đổi truy vấn)
+    // PersistMapCleanup(prefix = "podcastScreen/suggested/") // Bỏ để giữ trạng thái
 
     var suggestedPodcasts by persistList<PodcastEntity>(tag = "podcastScreen/suggestedPodcasts")
     var isLoadingSuggested by persist<Boolean>(tag = "podcastScreen/isLoadingSuggested", initialValue = true)
     var continuationToken by persist<String?>(tag = "podcastScreen/continuationToken")
+    var isRefreshing by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing && suggestedPodcasts.isNotEmpty()) {
+            // Nếu không làm mới và đã có danh sách, không tải lại
+            isLoadingSuggested = false
+            return@LaunchedEffect
+        }
+
         isLoadingSuggested = true
         withContext(Dispatchers.IO) {
             // Lấy danh sách podcast từ cơ sở dữ liệu
-            val dbPodcasts = Database.getPodcasts(20).distinctBy { it.browseId }
+            val dbPodcasts = Database.getPodcasts(50).distinctBy { it.browseId } // Tăng giới hạn lên 50
             // Lấy danh sách browseId của các podcast đã đăng ký
             val subscribedBrowseIds = Database.getSubscribedPodcasts().first().map { it.browseId }.toSet()
             // Lọc bỏ các podcast đã đăng ký
             val filteredDbPodcasts = dbPodcasts.filter { it.browseId !in subscribedBrowseIds }
-            if (filteredDbPodcasts.isNotEmpty()) {
+            if (filteredDbPodcasts.isNotEmpty() && !isRefreshing) {
                 suggestedPodcasts = filteredDbPodcasts.toImmutableList()
                 Log.d("SuggestedPodcastsScreen", "Loaded ${filteredDbPodcasts.size} podcasts from database")
             }
 
             val currentTime = System.currentTimeMillis()
             val lastRefreshed = getLastRefreshed(context)
-            if (currentTime - lastRefreshed > 60 * 60 * 1000) {
-                val queries = listOf("Podcast")
-                var podcasts = listOf<PodcastEntity>()
-                for (query in queries) {
-                    Log.d("SuggestedPodcastsScreen", "Trying query: $query")
-                    val result = Innertube.searchPodcasts(query)
-                    result?.onSuccess { page ->
-                        val newPodcasts = page?.items?.filterNot { podcast ->
-                            // Lọc bỏ podcast đã đăng ký và trùng lặp
-                            podcasts.any { it.browseId == podcast.key } || podcast.key in subscribedBrowseIds
-                        }?.mapNotNull { podcast ->
-                            fetchPodcastWithEpisodeCount(podcast, context)
-                        }?.distinctBy { it.browseId } ?: emptyList()
-                        podcasts = podcasts + newPodcasts
-                        continuationToken = page?.continuation
-                        if (podcasts.size >= 20) break
-                    }?.onFailure { e ->
-                        Log.e("SuggestedPodcastsScreen", "Error with query $query: ${e.message}", e)
-                    }
+            if (isRefreshing || currentTime - lastRefreshed > 60 * 60 * 1000) {
+                // Sử dụng một truy vấn chung để tìm podcast
+                val query = "Podcast"
+                Log.d("SuggestedPodcastsScreen", "Searching podcasts with query: $query")
+                Innertube.searchPodcasts(query)?.onSuccess { page ->
+                    // Chuyển đổi Innertube.PodcastItem sang PodcastEntity
+                    val newPodcasts = page.items?.filterNot { podcast ->
+                        // Lọc bỏ podcast đã đăng ký hoặc trùng lặp
+                        suggestedPodcasts.any { it.browseId == podcast.key } || podcast.key in subscribedBrowseIds
+                    }?.map { podcast ->
+                        PodcastEntity(
+                            browseId = podcast.key,
+                            title = podcast.info?.name ?: "",
+                            description = podcast.description,
+                            authorName = podcast.authors?.joinToString { it.name ?: "" },
+                            authorBrowseId = podcast.authors?.firstOrNull()?.endpoint?.browseId,
+                            thumbnailUrl = podcast.thumbnail?.url,
+                            episodeCount = podcast.episodeCount ?: 0,
+                            playlistId = podcast.playlistId,
+                            lastUpdated = System.currentTimeMillis()
+                        )
+                    }?.distinctBy { it.browseId } ?: emptyList()
+
+                    // Lưu vào cơ sở dữ liệu để khôi phục khi quay lại
+                    newPodcasts.forEach { Database.insertPodcast(it) }
+
+                    suggestedPodcasts = (suggestedPodcasts + newPodcasts)
+                        .filter { it.browseId !in subscribedBrowseIds }
+                        .distinctBy { it.browseId }
+                        .toImmutableList()
+                    continuationToken = page.continuation
+                    Log.d("SuggestedPodcastsScreen", "Fetched ${newPodcasts.size} podcasts from API")
+                }?.onFailure { e ->
+                    Log.e("SuggestedPodcastsScreen", "Search failed: ${e.message}", e)
+                    context.toast("Failed to load podcasts: ${e.message}")
                 }
-                podcasts.distinctBy { it.browseId }.forEach { Database.insertPodcast(it) }
-                if (podcasts.isNotEmpty()) {
-                    // Lọc lại danh sách để đảm bảo không có podcast đã đăng ký
-                    suggestedPodcasts = podcasts.filter { it.browseId !in subscribedBrowseIds }.distinctBy { it.browseId }.toImmutableList()
-                }
-                if (podcasts.isEmpty() && filteredDbPodcasts.isEmpty()) {
-                    Log.e("SuggestedPodcastsScreen", "All queries failed and database is empty")
+
+                if (suggestedPodcasts.isEmpty() && filteredDbPodcasts.isEmpty()) {
+                    Log.e("SuggestedPodcastsScreen", "No podcasts found")
                     context.toast("No podcasts found. Please try searching for a specific podcast.")
                 }
                 setLastRefreshed(context, currentTime)
             }
             isLoadingSuggested = false
+            isRefreshing = false
         }
     }
 
@@ -198,18 +181,32 @@ fun SuggestedPodcastsScreen(
                 val lastVisibleItem = visibleItems.lastOrNull()
                 if (lastVisibleItem != null && lastVisibleItem.index >= suggestedPodcasts.size - 2 && continuationToken != null) {
                     withContext(Dispatchers.IO) {
-                        // Lấy danh sách browseId của các podcast đã đăng ký
                         val subscribedBrowseIds = Database.getSubscribedPodcasts().first().map { it.browseId }.toSet()
                         Innertube.searchPodcastsWithContinuation(continuationToken!!)?.onSuccess { page ->
-                            val newPodcasts = page?.items?.filterNot { podcast ->
-                                // Lọc bỏ podcast đã đăng ký và trùng lặp
+                            val newPodcasts = page.items?.filterNot { podcast ->
                                 suggestedPodcasts.any { it.browseId == podcast.key } || podcast.key in subscribedBrowseIds
-                            }?.mapNotNull { podcast ->
-                                fetchPodcastWithEpisodeCount(podcast, context)
+                            }?.map { podcast ->
+                                PodcastEntity(
+                                    browseId = podcast.key,
+                                    title = podcast.info?.name ?: "",
+                                    description = podcast.description,
+                                    authorName = podcast.authors?.joinToString { it.name ?: "" },
+                                    authorBrowseId = podcast.authors?.firstOrNull()?.endpoint?.browseId,
+                                    thumbnailUrl = podcast.thumbnail?.url,
+                                    episodeCount = podcast.episodeCount ?: 0,
+                                    playlistId = podcast.playlistId,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
                             }?.distinctBy { it.browseId } ?: emptyList()
+
+                            // Lưu vào cơ sở dữ liệu để khôi phục
                             newPodcasts.forEach { Database.insertPodcast(it) }
-                            suggestedPodcasts = (suggestedPodcasts + newPodcasts).distinctBy { it.browseId }.toImmutableList()
-                            continuationToken = page?.continuation
+
+                            suggestedPodcasts = (suggestedPodcasts + newPodcasts)
+                                .distinctBy { it.browseId }
+                                .toImmutableList()
+                            continuationToken = page.continuation
+                            Log.d("SuggestedPodcastsScreen", "Loaded ${newPodcasts.size} additional podcasts")
                         }?.onFailure { e ->
                             Log.e("SuggestedPodcastsScreen", "Failed to load more podcasts: ${e.message}", e)
                             context.toast("Failed to load more podcasts: ${e.message}")
@@ -219,7 +216,6 @@ fun SuggestedPodcastsScreen(
             }
     }
 
-    // Phần còn lại của composable giữ nguyên
     Box(modifier = modifier.background(colorPalette.background0).fillMaxSize()) {
         LazyColumn(
             state = lazyListState,
@@ -263,7 +259,7 @@ fun SuggestedPodcastsScreen(
                                 )
                             }),
                             description = podcast.description,
-                            episodeCount = podcast.episodeCount,
+                            episodeCount = null,
                             playlistId = podcast.playlistId,
                             thumbnail = podcast.thumbnailUrl?.let { url ->
                                 Thumbnail(url = url, height = null, width = null)

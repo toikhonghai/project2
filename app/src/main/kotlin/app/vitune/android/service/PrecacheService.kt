@@ -8,6 +8,7 @@ import android.os.IBinder
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheSpan
@@ -256,14 +257,16 @@ class PrecacheService : DownloadService(
             transaction {
                 runCatching {
                     Database.insert(mediaItem)
-                }.also { if (it.isFailure) return@transaction }
-
+                }.onFailure {
+                    Log.e("PrecacheService", "Không thể chèn mediaItem: ${it.message}", it)
+                    context.toast("Không thể chèn media: ${it.message}")
+                    return@transaction
+                }
                 coroutineScope.launch {
                     context.download<PrecacheService>(downloadRequest).exceptionOrNull()?.let {
                         if (it is CancellationException) throw it
-
-                        it.printStackTrace()
-                        context.toast(context.getString(R.string.error_pre_cache))
+                        Log.e("PrecacheService", "Tải xuống thất bại cho ${mediaItem.mediaId}: ${it.message}", it)
+                        context.toast("Tải xuống thất bại: ${it.message}")
                     }
                 }
             }
