@@ -19,17 +19,26 @@
 
 ## Features
 
-- Play (almost) any song or video from YouTube Music
-- Play music from your device
-- Play songs in the background
-- Cache song for offline playback
-- Search for songs, albums, artists videos and playlists
-- Discover new songs by mood/genre
-- Import playlists from YouTube
-- Fetch, display and edit songs lyrics or synchronized lyrics
-- Manage your playlists locally or synchronize with the cloud
-- Highly customizable (dynamic theme, Material You, ...)
-- Normalize audio for the perfect listening experience
-- Listen from your car using Android Auto
-- Open YouTube/YouTube Music links (`watch`, `playlist`, `channel`, etc.) with ViTune
-- Ridiculously lightweight APK
+# Podcast
+Search, subscribe to podcasts via Innertube API
+Play, seek, save position
+Playback Menu: Play next, queue, download/delete, add/remove playlists, share, view on YouTube, add to favorites/blacklist
+Download podcasts for offline use, cache storage
+Create, edit playlists (CRUD)
+View history, mark episodes as completed
+
+# Music/Video
+Play music/videos from YouTube Music or device
+Background playback, offline caching
+Search songs, albums, artists, videos, playlists
+Discover music by mood/genre
+Import YouTube playlists
+Fetch, display, edit lyrics (synced)
+
+# Account & Customization
+Login/register with email/password
+Update profile, reset password, logout
+Manage playlists locally or sync to cloud
+Customize UI (Material You, dynamic themes)
+Normalize audio, support Android Auto
+Open YouTube/YouTube Music links, lightweight APK
