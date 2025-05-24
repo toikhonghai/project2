@@ -2,7 +2,7 @@
 <div align="center">
     <img src="./app/src/main/ic_launcher-playstore.png" width="128" height="128" style="display: block; margin: 0 auto"/>
     <h1>ViTune</h1>
-    <p>An Android application for seamless music streaming</p>
+    <p>An Android application for seamless music and podcast streaming</p>
 </div>
 
 ---
