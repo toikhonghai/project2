@@ -5,6 +5,7 @@ import android.database.SQLException
 import android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE
 import android.os.Parcel
 import androidx.annotation.OptIn
+import androidx.compose.ui.res.stringResource
 import androidx.core.database.getFloatOrNull
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -253,6 +254,12 @@ interface Database {
 
     @Query("SELECT likedAt FROM Song WHERE id = :songId")
     fun likedAt(songId: String): Flow<Long?>
+
+    @Query("UPDATE podcast_episodes SET likedAt = :likedAt WHERE videoId = :episodeId")
+    fun likePodcastEpisode(episodeId: String, likedAt: Long?): Int
+
+    @Query("SELECT likedAt FROM podcast_episodes WHERE videoId = :episodeId")
+    fun podcastEpisodeLikedAt(episodeId: String): Flow<Long?>
 
     @Query("UPDATE Song SET likedAt = :likedAt WHERE id = :songId")
     fun like(songId: String, likedAt: Long?): Int
@@ -1004,6 +1011,20 @@ interface Database {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     fun insert(podcastPlaylist: PodcastPlaylist): Long
 
+    @Query("SELECT * FROM PodcastPlaylist WHERE name = :name LIMIT 1")
+    suspend fun getPodcastPlaylistByName(name: String): PodcastPlaylist?
+
+    @Query("SELECT * FROM PodcastPlaylist WHERE name = :name LIMIT 1")
+    fun getPodcastPlaylistByNameSync(name: String): PodcastPlaylist?
+
+    @Transaction
+    suspend fun ensureDefaultPodcastPlaylist(name: String) {
+        if (getPodcastPlaylistByName(name) == null) {
+            insert(PodcastPlaylist(name = name, thumbnail = null))
+        }
+    }
+
+
     @Delete
     fun delete(podcastPlaylist: PodcastPlaylist)
 
@@ -1067,7 +1088,7 @@ interface Database {
         User::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 36,
+    version = 38,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -1124,7 +1145,9 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
                 From32To33Migration(),
                 From33To34Migration(),
                 From34To35Migration(),
-                From35To36Migration()
+                From35To36Migration(),
+                From36To37Migration(),
+                From37To38Migration()
             )
             .build()
 
@@ -1485,6 +1508,21 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE Song ADD COLUMN isDownloaded INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE Song ADD COLUMN downloadPath TEXT DEFAULT NULL")
+        }
+    }
+    class From36To37Migration : Migration(36, 37) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Không cần thay đổi schema, chỉ chèn playlist mặc định
+            val playlistValues = ContentValues().apply {
+                put("name", "Favorites") // Chuỗi mặc định bằng tiếng Anh, sẽ được dịch trong UI
+                putNull("thumbnail")
+            }
+            db.insert("PodcastPlaylist", CONFLICT_IGNORE, playlistValues)
+        }
+    }
+    class From37To38Migration : Migration(37, 38) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE podcast_episodes ADD COLUMN likedAt INTEGER")
         }
     }
 }

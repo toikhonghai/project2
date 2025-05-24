@@ -55,7 +55,9 @@ data class PodcastEpisodeEntity(
 
     val lastPlayed: Long? = null,
 
-    val customMetadata: Map<String, String>? = null
+    val customMetadata: Map<String, String>? = null,
+
+    val likedAt: Long? = null
 ) {
     companion object {
         fun fromPodcastEpisodeItem(episode: Innertube.PodcastEpisodeItem, podcastId: String): PodcastEpisodeEntity {
@@ -70,6 +72,8 @@ data class PodcastEpisodeEntity(
             )
         }
     }
+
+    fun toggleLike() = copy(likedAt = if (likedAt == null) System.currentTimeMillis() else null)
 
     @OptIn(UnstableApi::class)
     fun asMediaItem(): MediaItem {

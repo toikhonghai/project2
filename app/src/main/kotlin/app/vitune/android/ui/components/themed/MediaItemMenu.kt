@@ -59,6 +59,7 @@ import app.vitune.android.LocalPlayerServiceBinder
 import app.vitune.android.R
 import app.vitune.android.models.Info
 import app.vitune.android.models.Playlist
+import app.vitune.android.models.PodcastEntity
 import app.vitune.android.models.PodcastEpisodeEntity
 import app.vitune.android.models.PodcastEpisodePlaylistMap
 import app.vitune.android.models.PodcastPlaylist
@@ -915,6 +916,7 @@ fun PodcastEpisodeMenu(
     val binder = LocalPlayerServiceBinder.current
     val uriHandler = LocalUriHandler.current
     val coroutineScope = rememberCoroutineScope()
+    val favoritesPlaylistName = stringResource(R.string.favorites)
 
     var isViewingPlaylists by remember { mutableStateOf(false) }
     var height by remember { mutableStateOf(0.dp) }
@@ -924,7 +926,7 @@ fun PodcastEpisodeMenu(
 
     LaunchedEffect(Unit) {
         launch {
-            Database.likedAt(mediaItem.mediaId).collect { likedAt = it }
+            Database.podcastEpisodeLikedAt(mediaItem.mediaId).collect { likedAt = it }
         }
         launch {
             Database.blacklisted(mediaItem.mediaId).collect { isBlacklisted = it }
@@ -1080,14 +1082,73 @@ fun PodcastEpisodeMenu(
                         color = colorPalette.favoritesIcon,
                         onClick = {
                             query {
-                                if (
-                                    Database.like(
-                                        songId = mediaItem.mediaId,
-                                        likedAt = if (likedAt == null) System.currentTimeMillis() else null
-                                    ) != 0
-                                ) return@query
+                                runBlocking(Dispatchers.IO) {
+                                    val podcastId = mediaItem.mediaMetadata.extras?.getString("podcastId")
+                                    if (podcastId.isNullOrEmpty()) {
+                                        context.toast("Cannot add to Favorites: Invalid podcast ID")
+                                        return@runBlocking
+                                    }
 
-                                Database.insert(mediaItem, Song::toggleLike)
+                                    // Kiểm tra và chèn podcast nếu cần
+                                    val podcastExists = Database.getPodcastById(podcastId) != null
+                                    if (!podcastExists) {
+                                        Database.insertPodcast(
+                                            PodcastEntity(
+                                                browseId = podcastId,
+                                                title = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown Podcast",
+                                                description = null,
+                                                authorName = null,
+                                                authorBrowseId = null,
+                                                thumbnailUrl = null,
+                                                episodeCount = null,
+                                                lastUpdated = System.currentTimeMillis()
+                                            )
+                                        )
+                                    }
+
+                                    // Chèn hoặc cập nhật tập podcast
+                                    if (!Database.episodeExists(mediaItem.mediaId)) {
+                                        Database.insertEpisode(
+                                            PodcastEpisodeEntity(
+                                                videoId = mediaItem.mediaId,
+                                                podcastId = podcastId,
+                                                title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
+                                                thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                                durationText = mediaItem.mediaMetadata.extras?.getString("durationText"),
+                                                description = null,
+                                                publishedTimeText = null,
+                                                likedAt = System.currentTimeMillis() // Đặt likedAt ngay khi chèn
+                                            )
+                                        )
+                                    } else {
+                                        Database.likePodcastEpisode(
+                                            mediaItem.mediaId,
+                                            if (likedAt == null) System.currentTimeMillis() else null
+                                        )
+                                    }
+
+                                    // Xử lý playlist Favorites
+                                    val favoritesPlaylist = Database.getPodcastPlaylistByNameSync(favoritesPlaylistName)
+                                    favoritesPlaylist?.let {
+                                        if (likedAt == null) {
+                                            Database.insert(
+                                                PodcastEpisodePlaylistMap(
+                                                    episodeId = mediaItem.mediaId,
+                                                    playlistId = it.id,
+                                                    position = 0
+                                                )
+                                            )
+                                        } else {
+                                            Database.delete(
+                                                PodcastEpisodePlaylistMap(
+                                                    episodeId = mediaItem.mediaId,
+                                                    playlistId = it.id,
+                                                    position = 0
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         },
                         modifier = Modifier

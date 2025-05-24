@@ -77,6 +77,14 @@ fun HomePodcastPlaylists(
     var items by persistList<PodcastPlaylistPreview>("podcastScreen/playlists")
     var sortBy by rememberSaveable { mutableStateOf(PlaylistSortBy.Name) }
     var sortOrder by rememberSaveable { mutableStateOf(SortOrder.Ascending) }
+    var favoritesPlaylist by remember { mutableStateOf<PodcastPlaylistPreview?>(null) }
+    val favoritesPlaylistName = stringResource(R.string.favorites)
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            Database.ensureDefaultPodcastPlaylist(favoritesPlaylistName)
+        }
+    }
 
     // Dialog for creating a new playlist
     if (isCreatingANewPlaylist) TextFieldDialog(
@@ -111,10 +119,11 @@ fun HomePodcastPlaylists(
         }
     )
 
-    LaunchedEffect(sortBy, sortOrder) {
-        Database
-            .podcastPlaylistPreviews(sortBy, sortOrder)
-            .collect { items = it.toImmutableList() }
+    LaunchedEffect(sortBy, sortOrder, favoritesPlaylistName) {
+        Database.podcastPlaylistPreviews(sortBy, sortOrder).collect { previews ->
+            items = previews.filter { it.name != favoritesPlaylistName }.toImmutableList()
+            favoritesPlaylist = previews.find { it.name == favoritesPlaylistName }
+        }
     }
 
     val sortOrderIconRotation by animateFloatAsState(
@@ -174,6 +183,28 @@ fun HomePodcastPlaylists(
                         color = colorPalette.text,
                         onClick = { sortOrder = !sortOrder },
                         modifier = Modifier.graphicsLayer { rotationZ = sortOrderIconRotation }
+                    )
+                }
+            }
+
+            favoritesPlaylist?.let { playlist ->
+                item(key = "favorites") {
+                    PlaylistItem(
+                        icon = R.drawable.heart,
+                        colorTint = colorPalette.red,
+                        name = favoritesPlaylistName,
+                        songCount = playlist.episodeCount,
+                        thumbnailSize = Dimensions.thumbnails.playlist,
+                        alternative = UIStatePreferences.playlistsAsGrid,
+                        modifier = Modifier
+                            .animateItem()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = {
+                                        onPlaylistClick(PodcastPlaylist(id = playlist.id, name = playlist.name, thumbnail = playlist.thumbnail))
+                                    }
+                                )
+                            }
                     )
                 }
             }
