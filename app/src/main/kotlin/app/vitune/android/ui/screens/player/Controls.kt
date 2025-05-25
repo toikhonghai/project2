@@ -60,6 +60,7 @@ import app.vitune.android.ui.components.SeekBar
 import app.vitune.android.ui.components.themed.BigIconButton
 import app.vitune.android.ui.components.themed.IconButton
 import app.vitune.android.ui.screens.artistRoute
+import app.vitune.android.ui.screens.podcastRoute
 import app.vitune.android.utils.bold
 import app.vitune.android.utils.forceSeekToNext
 import app.vitune.android.utils.forceSeekToPrevious
@@ -364,15 +365,21 @@ private fun PlayButton(
 @Composable
 private fun MediaInfo(media: UiMedia) {
     val (colorPalette, typography) = LocalAppearance.current
+    val isPodcast = media.extras?.getBoolean("isPodcast") == true
+    val podcastId = media.extras?.getString("podcastId")
 
     var artistInfo: List<Info>? by remember { mutableStateOf(null) }
     var maxHeight by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(media) {
         withContext(Dispatchers.IO) {
-            artistInfo = Database
-                .songArtistInfo(media.id)
-                .takeIf { it.isNotEmpty() }
+            artistInfo = if (!isPodcast) {
+                Database
+                    .songArtistInfo(media.id)
+                    .takeIf { it.isNotEmpty() }
+            } else {
+                null // Podcast không cần thông tin nghệ sĩ
+            }
         }
     }
 
@@ -392,35 +399,26 @@ private fun MediaInfo(media: UiMedia) {
         }
 
         AnimatedContent(
-            targetState = media to artistInfo,
+            targetState = Triple(media, artistInfo, isPodcast),
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = ""
-        ) { (media, state) ->
-            state?.let { artists ->
+        ) { (media, state, isPodcast) ->
+            if (isPodcast && podcastId != null) {
+                // Hiển thị tên channel cho podcast
                 FadingRow(
                     modifier = Modifier
                         .fillMaxWidth(0.75f)
                         .heightIn(maxHeight.px.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    artists.fastForEachIndexed { i, artist ->
-                        if (i == artists.lastIndex && artists.size > 1) BasicText(
-                            text = " & ",
-                            style = typography.s.semiBold.secondary
-                        )
-                        BasicText(
-                            text = artist.name.orEmpty(),
-                            style = typography.s.bold.secondary,
-                            modifier = Modifier.clickable { artistRoute.global(artist.id) }
-                        )
-                        if (i != artists.lastIndex && i + 1 != artists.lastIndex) BasicText(
-                            text = ", ",
-                            style = typography.s.semiBold.secondary
-                        )
-                    }
+                    BasicText(
+                        text = media.artist, // Tên channel được lưu trong artist
+                        style = typography.s.semiBold.secondary,
+                        maxLines = 1,
+                        modifier = Modifier.clickable { podcastRoute.global(podcastId) } // Chuyển đến PodcastDetailScreen
+                    )
                     if (media.explicit) {
                         Spacer(Modifier.width(4.dp))
-
                         Image(
                             painter = painterResource(R.drawable.explicit),
                             contentDescription = null,
@@ -429,25 +427,59 @@ private fun MediaInfo(media: UiMedia) {
                         )
                     }
                 }
-            } ?: FadingRow(
-                modifier = Modifier.fillMaxWidth(0.75f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BasicText(
-                    text = media.artist,
-                    style = typography.s.semiBold.secondary,
-                    maxLines = 1,
-                    modifier = Modifier.onGloballyPositioned { maxHeight = it.size.height }
-                )
-                if (media.explicit) {
-                    Spacer(Modifier.width(4.dp))
-
-                    Image(
-                        painter = painterResource(R.drawable.explicit),
-                        contentDescription = null,
-                        colorFilter = ColorFilter.tint(colorPalette.text),
-                        modifier = Modifier.size(15.dp)
+            } else {
+                // Logic hiện tại cho bài hát
+                state?.let { artists ->
+                    FadingRow(
+                        modifier = Modifier
+                            .fillMaxWidth(0.75f)
+                            .heightIn(maxHeight.px.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        artists.fastForEachIndexed { i, artist ->
+                            if (i == artists.lastIndex && artists.size > 1) BasicText(
+                                text = " & ",
+                                style = typography.s.semiBold.secondary
+                            )
+                            BasicText(
+                                text = artist.name.orEmpty(),
+                                style = typography.s.bold.secondary,
+                                modifier = Modifier.clickable { artistRoute.global(artist.id) }
+                            )
+                            if (i != artists.lastIndex && i + 1 != artists.lastIndex) BasicText(
+                                text = ", ",
+                                style = typography.s.semiBold.secondary
+                            )
+                        }
+                        if (media.explicit) {
+                            Spacer(Modifier.width(4.dp))
+                            Image(
+                                painter = painterResource(R.drawable.explicit),
+                                contentDescription = null,
+                                colorFilter = ColorFilter.tint(colorPalette.text),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                } ?: FadingRow(
+                    modifier = Modifier.fillMaxWidth(0.75f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicText(
+                        text = media.artist,
+                        style = typography.s.semiBold.secondary,
+                        maxLines = 1,
+                        modifier = Modifier.onGloballyPositioned { maxHeight = it.size.height }
                     )
+                    if (media.explicit) {
+                        Spacer(Modifier.width(4.dp))
+                        Image(
+                            painter = painterResource(R.drawable.explicit),
+                            contentDescription = null,
+                            colorFilter = ColorFilter.tint(colorPalette.text),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
         }

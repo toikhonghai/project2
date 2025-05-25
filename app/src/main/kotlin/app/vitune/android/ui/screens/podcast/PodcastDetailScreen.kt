@@ -54,6 +54,7 @@ import app.vitune.android.ui.items.SongItemPlaceholder
 import app.vitune.android.ui.screens.GlobalRoutes
 import app.vitune.android.utils.asMediaItem
 import app.vitune.android.utils.forcePlay
+import app.vitune.android.utils.forcePlayAtIndex
 import app.vitune.android.utils.secondary
 import app.vitune.android.utils.semiBold
 import app.vitune.android.utils.toast
@@ -404,25 +405,29 @@ fun PodcastDetailScreen(
                                             binder?.let {
                                                 withContext(Dispatchers.Main) {
                                                     it.stopRadio()
-                                                    val mediaItem = episode.asMediaItem()
-                                                    it.player.forcePlay(mediaItem)
-                                                    it.setupRadio(
-                                                        NavigationEndpoint.Endpoint.Watch(videoId = episode.videoId)
-                                                    )
-                                                    // Xếp hàng các tập liên quan
-                                                    val playlistId = podcast?.playlistId
-                                                    if (playlistId != null) {
-                                                        val episodesPage = Innertube.loadPodcastEpisodesNext(playlistId)?.getOrNull()
-                                                        val mediaItems = episodesPage?.items?.map { it.asMediaItem() } ?: emptyList()
-                                                        it.player.addMediaItems(mediaItems)
+                                                    val mediaItems = episodes?.map { ep -> ep.asMediaItem() } ?: emptyList()
+                                                    val index = episodes?.indexOfFirst { it.videoId == episode.videoId } ?: -1
+                                                    if (index != -1 && mediaItems.isNotEmpty()) {
+                                                        it.player.forcePlayAtIndex(mediaItems, index)
+                                                        if (episode.playPositionMs > 0) {
+                                                            it.player.seekTo(episode.playPositionMs)
+                                                        }
+                                                        it.setupRadio(
+                                                            NavigationEndpoint.Endpoint.Watch(videoId = episode.videoId)
+                                                        )
                                                         Log.d(
                                                             "PodcastDetailScreen",
-                                                            "Playing podcast episode: ${episode.title} with queue of ${mediaItems.size} episodes"
+                                                            "Playing podcast episode: ${episode.title} at index $index with queue of ${mediaItems.size} episodes"
                                                         )
                                                     } else {
+                                                        val mediaItem = episode.asMediaItem()
+                                                        it.player.forcePlay(mediaItem)
+                                                        it.setupRadio(
+                                                            NavigationEndpoint.Endpoint.Watch(videoId = episode.videoId)
+                                                        )
                                                         Log.d(
                                                             "PodcastDetailScreen",
-                                                            "Playing single podcast episode: ${episode.title}"
+                                                            "Playing single podcast episode: ${episode.title} (not found in episodes)"
                                                         )
                                                     }
                                                 }

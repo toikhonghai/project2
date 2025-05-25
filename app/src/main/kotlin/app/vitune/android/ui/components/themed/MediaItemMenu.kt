@@ -52,6 +52,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.Log
 import app.vitune.android.Database
@@ -74,6 +75,7 @@ import app.vitune.android.ui.items.SongItem
 import app.vitune.android.ui.screens.albumRoute
 import app.vitune.android.ui.screens.artistRoute
 import app.vitune.android.ui.screens.home.HideSongDialog
+import app.vitune.android.utils.PodcastDownloadViewModel
 import app.vitune.android.utils.addNext
 import app.vitune.android.utils.asMediaItem
 import app.vitune.android.utils.enqueue
@@ -924,6 +926,8 @@ fun PodcastEpisodeMenu(
     var isBlacklisted by remember { mutableStateOf(false) }
     var isDownloaded by remember { mutableStateOf(false) }
 
+    val podcastDownloadViewModel: PodcastDownloadViewModel = viewModel()
+
     LaunchedEffect(Unit) {
         launch {
             Database.podcastEpisodeLikedAt(mediaItem.mediaId).collect { likedAt = it }
@@ -1237,34 +1241,7 @@ fun PodcastEpisodeMenu(
                 text = stringResource(R.string.download),
                 onClick = {
                     onDismiss()
-                    coroutineScope.launch(Dispatchers.IO) {
-                        try {
-                            val streamUrl = Innertube.getPodcastStreamUrl(mediaItem.mediaId)
-                                ?: throw Exception("Không tìm thấy URL luồng podcast")
-                            if (!Database.episodeExists(mediaItem.mediaId)) {
-                                Database.insertEpisode(
-                                    PodcastEpisodeEntity(
-                                        videoId = mediaItem.mediaId,
-                                        podcastId = mediaItem.mediaMetadata.extras?.getString("podcastId") ?: "",
-                                        title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
-                                        thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
-                                        durationText = mediaItem.mediaMetadata.extras?.getString("durationText") ?: "0:00",
-                                        description = null,
-                                        publishedTimeText = null
-                                    )
-                                )
-                            }
-                            DownloadService.startDownload(context.applicationContext, mediaItem.mediaId, streamUrl)
-                            withContext(Dispatchers.Main) {
-                                context.toast("Đã bắt đầu tải podcast")
-                            }
-                        } catch (e: Exception) {
-                            Log.e("PodcastEpisodeMenu", "Tải podcast thất bại: ${e.message}", e)
-                            withContext(Dispatchers.Main) {
-                                context.toast("Tải podcast thất bại: ${e.message}")
-                            }
-                        }
-                    }
+                    podcastDownloadViewModel.downloadPodcastEpisode(context, mediaItem)
                 }
             )
 

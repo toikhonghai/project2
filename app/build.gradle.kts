@@ -196,4 +196,6 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.auth)
     implementation(libs.google.services)
+
+    implementation(libs.lifecycle.viewmodel)
 }

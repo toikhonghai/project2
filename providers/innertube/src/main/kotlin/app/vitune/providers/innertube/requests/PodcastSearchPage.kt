@@ -3,6 +3,7 @@ package app.vitune.providers.innertube.requests
 import app.vitune.providers.innertube.Innertube
 import app.vitune.providers.innertube.Innertube.Info
 import app.vitune.providers.innertube.Innertube.ItemsPage
+import app.vitune.providers.innertube.Innertube.PLAYER
 import app.vitune.providers.innertube.Innertube.PodcastEpisodeItem
 import app.vitune.providers.innertube.Innertube.PodcastItem
 import app.vitune.providers.innertube.Innertube.SEARCH
@@ -192,18 +193,10 @@ private fun parsePodcastItem(content: MusicShelfRenderer.Content): PodcastItem? 
     )
 }
 
-suspend fun Innertube.getPodcastStreamUrl(videoId: String): String? = runCatchingCancellable {
+suspend fun Innertube.getPodcastStreamUrl(context: Context, videoId: String): String? = runCatchingCancellable {
     val body = PlayerBody(
         videoId = videoId,
-        context = Context(
-            client = Context.Client(
-                clientName = "WEB_REMIX",
-                clientVersion = "1.20241028.01.00",
-                gl = "VN",
-                hl = "vi"
-            ),
-            user = Context.User()
-        )
+        context = context // Sử dụng context được truyền vào
     )
 
     val response = client.post(PLAYER) {
@@ -211,7 +204,9 @@ suspend fun Innertube.getPodcastStreamUrl(videoId: String): String? = runCatchin
         body.context.apply()
     }.body<PlayerResponse>()
 
-    response.streamingData?.adaptiveFormats
-        ?.firstOrNull { it.mimeType.contains("audio/mp3") || it.mimeType.contains("application/x-mpegURL") }
-        ?.url
+    val audioFormat = response.streamingData?.adaptiveFormats
+        ?.filter { it.mimeType.startsWith("audio/") && !it.mimeType.contains("video/") }
+        ?.maxByOrNull { it.bitrate ?: 0 }
+
+    audioFormat?.url
 }?.onFailure { logger.error("Failed to get stream URL for videoId $videoId: ${it.message}", it) }?.getOrNull()

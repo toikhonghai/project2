@@ -97,7 +97,6 @@ fun SuggestedPodcastsScreen(
     val lazyListState = rememberLazyListState()
     val (colorPalette, typography) = LocalAppearance.current
 
-    // Chỉ dọn dẹp khi cần làm mới hoàn toàn (ví dụ: khi thay đổi truy vấn)
     // PersistMapCleanup(prefix = "podcastScreen/suggested/") // Bỏ để giữ trạng thái
 
     var suggestedPodcasts by persistList<PodcastEntity>(tag = "podcastScreen/suggestedPodcasts")
@@ -107,18 +106,14 @@ fun SuggestedPodcastsScreen(
 
     LaunchedEffect(isRefreshing) {
         if (!isRefreshing && suggestedPodcasts.isNotEmpty()) {
-            // Nếu không làm mới và đã có danh sách, không tải lại
             isLoadingSuggested = false
             return@LaunchedEffect
         }
 
         isLoadingSuggested = true
         withContext(Dispatchers.IO) {
-            // Lấy danh sách podcast từ cơ sở dữ liệu
             val dbPodcasts = Database.getPodcasts(50).distinctBy { it.browseId } // Tăng giới hạn lên 50
-            // Lấy danh sách browseId của các podcast đã đăng ký
             val subscribedBrowseIds = Database.getSubscribedPodcasts().first().map { it.browseId }.toSet()
-            // Lọc bỏ các podcast đã đăng ký
             val filteredDbPodcasts = dbPodcasts.filter { it.browseId !in subscribedBrowseIds }
             if (filteredDbPodcasts.isNotEmpty() && !isRefreshing) {
                 suggestedPodcasts = filteredDbPodcasts.toImmutableList()
@@ -128,13 +123,10 @@ fun SuggestedPodcastsScreen(
             val currentTime = System.currentTimeMillis()
             val lastRefreshed = getLastRefreshed(context)
             if (isRefreshing || currentTime - lastRefreshed > 60 * 60 * 1000) {
-                // Sử dụng một truy vấn chung để tìm podcast
                 val query = "Podcast"
                 Log.d("SuggestedPodcastsScreen", "Searching podcasts with query: $query")
                 Innertube.searchPodcasts(query)?.onSuccess { page ->
-                    // Chuyển đổi Innertube.PodcastItem sang PodcastEntity
                     val newPodcasts = page.items?.filterNot { podcast ->
-                        // Lọc bỏ podcast đã đăng ký hoặc trùng lặp
                         suggestedPodcasts.any { it.browseId == podcast.key } || podcast.key in subscribedBrowseIds
                     }?.map { podcast ->
                         PodcastEntity(
