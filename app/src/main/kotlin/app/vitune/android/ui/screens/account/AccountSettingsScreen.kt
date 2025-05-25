@@ -49,6 +49,7 @@ import app.vitune.android.R
 import app.vitune.android.ui.components.themed.Header
 import app.vitune.android.ui.components.themed.IconButton
 import app.vitune.android.utils.toast
+import app.vitune.core.ui.surface
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -86,7 +87,7 @@ fun AccountSettingsScreen() {
             DisposableEffect(Unit) {
                 val authListener = FirebaseAuth.AuthStateListener { auth ->
                     if (auth.currentUser == null) {
-                        context.toast("Vui lòng đăng nhập lại sau khi xác minh email.")
+                        context.toast(context.getString(R.string.please_login_again))
                         loginRoute()
                     }
                 }
@@ -99,7 +100,7 @@ fun AccountSettingsScreen() {
             if (showLogoutDialog) {
                 AlertDialog(
                     onDismissRequest = { showLogoutDialog = false },
-                    text = { Text(stringResource(R.string.logout_dialog_message), style = typography.m) },
+                    text = { Text(stringResource(R.string.logout_dialog_message), style = typography.m, color = colorPalette.text) },
                     confirmButton = {
                         TextButton(
                             onClick = {
@@ -116,7 +117,9 @@ fun AccountSettingsScreen() {
                         TextButton(onClick = { showLogoutDialog = false }) {
                             Text(stringResource(R.string.cancel), color = colorPalette.textSecondary)
                         }
-                    }
+                    },
+                    containerColor = colorPalette.surface,
+                    modifier = Modifier.padding(16.dp)
                 )
             }
 
@@ -129,6 +132,7 @@ fun AccountSettingsScreen() {
                 Column(
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    Spacer(modifier = Modifier.height(16.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -232,7 +236,6 @@ fun AccountSettingsScreen() {
                                 }
                             )
 
-                            // Add "Forgot Password" text button
                             TextButton(
                                 onClick = {
                                     coroutineScope.launch {
@@ -242,13 +245,13 @@ fun AccountSettingsScreen() {
                                             val userEmail = currentUser?.email
                                             if (userEmail != null) {
                                                 FirebaseAuth.getInstance().sendPasswordResetEmail(userEmail).await()
-                                                context.toast("Email đặt lại mật khẩu đã được gửi đến $userEmail")
+                                                context.toast(context.getString(R.string.password_reset_email_sent, userEmail))
                                             } else {
-                                                errorMessage = "Không tìm thấy email tài khoản"
+                                                errorMessage = context.getString(R.string.no_account_email_found)
                                             }
                                         } catch (e: Exception) {
                                             Log.e("AccountSettings", "Forgot password error", e)
-                                            errorMessage = "Lỗi: ${e.message}"
+                                            errorMessage = context.getString(R.string.error_with_message, e.message)
                                         } finally {
                                             isLoading = false
                                         }
@@ -284,14 +287,14 @@ fun AccountSettingsScreen() {
 
                                         // Don't require password verification if no changes
                                         if (!hasChanges) {
-                                            context.toast("Không có thông tin thay đổi")
+                                            context.toast(context.getString(R.string.no_changes_made))
                                             isLoading = false
                                             return@launch
                                         }
 
                                         // Require current password for any changes
                                         if (currentPassword.isEmpty()) {
-                                            errorMessage = "Vui lòng nhập mật khẩu hiện tại để xác nhận"
+                                            errorMessage = context.getString(R.string.current_password_required)
                                             isLoading = false
                                             return@launch
                                         }
@@ -300,7 +303,7 @@ fun AccountSettingsScreen() {
                                         val userEmail = user?.email
 
                                         if (userEmail.isNullOrEmpty()) {
-                                            errorMessage = "Không thể xác định email người dùng"
+                                            errorMessage = context.getString(R.string.cannot_determine_user_email)
                                             isLoading = false
                                             return@launch
                                         }
@@ -310,7 +313,7 @@ fun AccountSettingsScreen() {
                                         Log.d("AccountSettings", "Providers: $providers")
 
                                         if (!providers.contains(EmailAuthProvider.PROVIDER_ID)) {
-                                            errorMessage = "Tài khoản của bạn không sử dụng đăng nhập bằng email/mật khẩu"
+                                            errorMessage = context.getString(R.string.account_not_email_password)
                                             isLoading = false
                                             return@launch
                                         }
@@ -323,7 +326,7 @@ fun AccountSettingsScreen() {
                                             Log.d("AccountSettings", "Reauthentication successful")
                                         } catch (e: Exception) {
                                             Log.e("AccountSettings", "Reauthentication failed", e)
-                                            errorMessage = "Xác thực thất bại: Mật khẩu hiện tại không đúng"
+                                            errorMessage = context.getString(R.string.reauthentication_failed)
                                             isLoading = false
                                             return@launch
                                         }
@@ -332,7 +335,7 @@ fun AccountSettingsScreen() {
                                         if (newEmail != originalEmail) {
                                             // Kiểm tra định dạng email
                                             if (!android.util.Patterns.EMAIL_ADDRESS.matcher(newEmail).matches()) {
-                                                errorMessage = "Email không hợp lệ"
+                                                errorMessage = context.getString(R.string.invalid_email)
                                                 isLoading = false
                                                 return@launch
                                             }
@@ -340,14 +343,14 @@ fun AccountSettingsScreen() {
                                             // Gửi email xác minh
                                             try {
                                                 user.verifyBeforeUpdateEmail(newEmail).await()
-                                                context.toast("Email xác minh đã được gửi đến $newEmail. Vui lòng xác minh trước khi cập nhật.")
+                                                context.toast(context.getString(R.string.verification_email_sent, newEmail))
                                                 Log.d("AccountSettings", "Verification email sent to $newEmail")
                                                 // Chuyển hướng ngay về LoginScreen sau khi gửi email xác minh
                                                 loginRoute()
                                                 return@launch
                                             } catch (e: Exception) {
                                                 Log.e("AccountSettings", "Error sending verification email", e)
-                                                errorMessage = "Không thể gửi email xác minh: ${e.message}"
+                                                errorMessage = context.getString(R.string.cannot_send_verification_email, e.message)
                                                 isLoading = false
                                                 return@launch
                                             }
@@ -365,7 +368,7 @@ fun AccountSettingsScreen() {
                                             }
                                         } catch (e: Exception) {
                                             Log.e("AccountSettings", "Error updating display name", e)
-                                            errorMessage = "Không thể cập nhật tên hiển thị: ${e.message}"
+                                            errorMessage = context.getString(R.string.cannot_update_display_name, e.message)
                                             isLoading = false
                                             return@launch
                                         }
@@ -378,13 +381,13 @@ fun AccountSettingsScreen() {
                                             }
                                         } catch (e: Exception) {
                                             Log.e("AccountSettings", "Error updating password", e)
-                                            errorMessage = "Không thể cập nhật mật khẩu: ${e.message}"
+                                            errorMessage = context.getString(R.string.cannot_update_password, e.message)
                                             isLoading = false
                                             return@launch
                                         }
 
                                         // Hiển thị thông báo thành công
-                                        context.toast("Cập nhật thông tin thành công")
+                                        context.toast(context.getString(R.string.update_success))
 
                                         // Reset các trường nếu người dùng không bị đăng xuất
                                         if (FirebaseAuth.getInstance().currentUser != null) {
@@ -394,7 +397,7 @@ fun AccountSettingsScreen() {
 
                                     } catch (e: Exception) {
                                         Log.e("AccountSettings", "Update failed", e)
-                                        errorMessage = "Cập nhật thất bại: ${e.message}"
+                                        errorMessage = context.getString(R.string.update_failed, e.message)
                                     } finally {
                                         isLoading = false
                                     }

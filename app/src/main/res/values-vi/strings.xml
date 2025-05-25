@@ -102,6 +102,21 @@
     <string name="update_success">Cập nhật thông tin thành công</string>
     <string name="update_failed">Cập nhật thất bại: %s</string>
 
+    <string name="enter_your_email_reset_password">Nhập email của bạn để nhận liên kết đặt lại mật khẩu.</string>
+    <string name="send_link">Gửi liên kết</string>
+    <string name="go_back">Quay lại</string>
+    <string name="register_now">Đăng ký ngay</string>
+    <string name="already_have_account">Đã có tài khoản? Đăng nhập</string>
+    <string name="no_account_yet_register">Chưa có tài khoản? Đăng ký ngay</string>
+    <string name="name">Tên</string>
+    <string name="password_too_short">Mật khẩu phải có ít nhất 6 ký tự</string>
+    <string name="email_cannot_be_empty">Email không được để trống</string>
+    <string name="login_failed">Đăng nhập thất bại: %s</string>
+    <string name="register_failed">Đăng ký thất bại: %s</string>
+    <string name="sign_in">Đăng nhập</string>
+    <string name="login_success">Đăng nhập thành công!</string>
+    <string name="registration_success">Đăng ký thành công!</string>
+
     <string name="on_label">Bật</string>
     <string name="off_label">Tắt</string>
     <string name="off_text">Tắt</string>

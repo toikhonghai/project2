@@ -14,6 +14,7 @@ import app.vitune.android.models.SearchQuery
 import app.vitune.android.preferences.DataPreferences
 import app.vitune.android.query
 import app.vitune.android.ui.screens.account.AccountSettingsScreen
+import app.vitune.android.ui.screens.account.ForgotPasswordScreen
 import app.vitune.android.ui.screens.account.LoginScreen
 import app.vitune.android.ui.screens.account.RegisterScreen
 import app.vitune.android.ui.screens.album.AlbumScreen
@@ -61,6 +62,7 @@ val loginRoute = Route0("loginRoute")
 val registerRoute = Route0("registerRoute")
 val homeRoute = Route0("homeRoute")
 val accountSettingsRoute = Route0("accountSettingsRoute")
+val forgotPasswordRoute = Route0("forgotPasswordRoute")
 @Composable
 fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng cho RouteHandlerScope để định nghĩa các route toàn cục.
 
@@ -93,6 +95,9 @@ fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng 
             },
             onNavigateToRegister = {
                 replace(registerRoute)
+            },
+            onNavigateToForgotPassword = {
+                replace(forgotPasswordRoute)
             }
         )
     }
@@ -103,6 +108,17 @@ fun RouteHandlerScope.GlobalRoutes() { // Hàm extension Composable mở rộng 
                 replace(homeRoute) // Chuyển đến homeRoute thay vì replace(null)
             },
             onNavigateToLogin = {
+                replace(loginRoute)
+            }
+        )
+    }
+
+    forgotPasswordRoute {
+        ForgotPasswordScreen(
+            onEmailSent = {
+                replace(loginRoute)
+            },
+            onNavigateBack = {
                 replace(loginRoute)
             }
         )

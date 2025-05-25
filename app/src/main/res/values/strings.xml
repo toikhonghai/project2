@@ -103,6 +103,21 @@
     <string name="update_success">Information updated successfully</string>
     <string name="update_failed">Update failed: %s</string>
 
+    <string name="enter_your_email_reset_password">Enter your email to receive a password reset link.</string>
+    <string name="send_link">Send link</string>
+    <string name="go_back">Go back</string>
+    <string name="register_now">Register now</string>
+    <string name="already_have_account">Already have an account? Sign In</string>
+    <string name="no_account_yet_register">No account yet? Register now</string>
+    <string name="name">Name</string>
+    <string name="password_too_short">Password must be at least 6 characters</string>
+    <string name="email_cannot_be_empty">Email cannot be empty</string>
+    <string name="login_failed">Login failed: %s</string>
+    <string name="register_failed">Register failed: %s</string>
+    <string name="sign_in">Sign In</string>
+    <string name="login_success">Login successful!</string>
+    <string name="registration_success">Registration successful!</string>
+
     <string name="on_label">on</string>
     <string name="off_label">off</string>
     <string name="off_text">Off</string>
