@@ -213,13 +213,6 @@ fun QuickPicks(
 
             // Nếu dữ liệu liên quan đã được load thành công
             relatedPageResult?.getOrNull()?.let { related ->
-                trending?.let {
-                    BasicText(
-                        text = stringResource(R.string.trending), // Cần thêm string resource này
-                        style = typography.m.semiBold,
-                        modifier = sectionTextModifier
-                    )
-                }
                 // Lưới ngang hiển thị các mục được đề xuất (bài hát, album, v.v.)
                 LazyHorizontalGrid(
                     state = quickPicksLazyGridState, // Trạng thái cuộn cho lưới
