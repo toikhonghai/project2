@@ -236,6 +236,22 @@ data class Context( // lớp Context này dùng để lưu thông tin về clien
                 music = false
             )
         )
+
+        val DefaultVietnam = Context(
+            client = Client(
+                clientId = 21,
+                clientName = "ANDROID_MUSIC",
+                clientVersion = "7.27.52",
+                platform = "MOBILE",
+                osVersion = "11",
+                androidSdkVersion = 30,
+                userAgent = UserAgents.ANDROID_MUSIC,
+                apiKey = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI",
+                music = true,
+                hl = "vi",
+                gl = "VN"
+            )
+        )
     }
 }
 

@@ -165,12 +165,12 @@ fun HomeDiscovery(
 
                     LazyHorizontalGrid( // Lưới ngang cho các mood
                         state = moodGridState, // Trạng thái cuộn
-                        rows = GridCells.Fixed(4), // 4 hàng
+                        rows = GridCells.Fixed(8), // 4 hàng
                         flingBehavior = rememberSnapFlingBehavior(moodSnapLayoutInfoProvider), // Hành vi cuộn
                         contentPadding = endPaddingValues, // Padding bên phải
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height((4 * (64 + 4)).dp) // Chiều cao của mood
+                            .height((8 * (64 + 4)).dp) // Chiều cao của mood
                     ) {
                         items( // Lặp qua các mood
                             items = page.moods.sortedBy { it.title },

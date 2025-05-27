@@ -13,11 +13,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -176,9 +181,23 @@ fun AccountSettingsScreen() {
                                 errorMessage = null
                             },
                             label = { Text(stringResource(R.string.display_name)) },
+                            textStyle = typography.xs,
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = stringResource(R.string.name), tint = colorPalette.text) },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                            isError = errorMessage != null
+                            isError = errorMessage != null,
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colorPalette.text,
+                                unfocusedBorderColor = colorPalette.text.copy(alpha = 0.5f),
+                                focusedLabelColor = colorPalette.text,
+                                unfocusedLabelColor = colorPalette.text.copy(alpha = 0.7f),
+                                unfocusedTextColor = colorPalette.text,
+                                focusedTextColor = colorPalette.text,
+                                cursorColor = colorPalette.text,
+                                errorBorderColor = colorPalette.red,
+                                errorLabelColor = colorPalette.red
+                            )
                         )
 
                         OutlinedTextField(
@@ -187,10 +206,21 @@ fun AccountSettingsScreen() {
                                 newEmail = it
                                 errorMessage = null
                             },
-                            label = { Text(text = stringResource(R.string.email)) },
+                            label = { Text(stringResource(R.string.email)) },
+                            textStyle = typography.xs,
+                            leadingIcon = { Icon(Icons.Default.Email, contentDescription = stringResource(R.string.email), tint = colorPalette.text) },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            isError = errorMessage != null
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colorPalette.text,
+                                unfocusedBorderColor = colorPalette.text.copy(alpha = 0.5f),
+                                focusedLabelColor = colorPalette.text,
+                                unfocusedLabelColor = colorPalette.text.copy(alpha = 0.7f),
+                                unfocusedTextColor = colorPalette.text,
+                                focusedTextColor = colorPalette.text,
+                                cursorColor = colorPalette.text
+                            )
                         )
 
                         OutlinedTextField(
@@ -200,18 +230,33 @@ fun AccountSettingsScreen() {
                                 errorMessage = null
                             },
                             label = { Text(stringResource(R.string.new_password_optional)) },
-                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = typography.xs,
+                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = stringResource(R.string.password), tint = colorPalette.text) },
                             visualTransformation = if (showNewPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            isError = errorMessage != null,
                             trailingIcon = {
-                                IconButton(
+                                androidx.compose.material3.IconButton(
                                     onClick = { showNewPassword = !showNewPassword },
-                                    icon = if (showNewPassword) R.drawable.visibility else R.drawable.visibility_off,
-                                    color = colorPalette.text,
                                     modifier = Modifier.size(24.dp)
-                                )
-                            }
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = if (showNewPassword) R.drawable.visibility else R.drawable.visibility_off),
+                                        contentDescription = if (showNewPassword) "Hide password" else "Show password",
+                                        tint = colorPalette.text.copy(alpha = 0.7f)
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colorPalette.text,
+                                unfocusedBorderColor = colorPalette.text.copy(alpha = 0.5f),
+                                focusedLabelColor = colorPalette.text,
+                                unfocusedLabelColor = colorPalette.text.copy(alpha = 0.7f),
+                                unfocusedTextColor = colorPalette.text,
+                                focusedTextColor = colorPalette.text,
+                                cursorColor = colorPalette.text
+                            )
                         )
 
                         if (hasChanges) {
@@ -222,18 +267,33 @@ fun AccountSettingsScreen() {
                                     errorMessage = null
                                 },
                                 label = { Text(text = stringResource(R.string.current_password)) },
-                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = typography.xs,
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = stringResource(R.string.password), tint = colorPalette.text) },
                                 visualTransformation = if (showCurrentPassword) VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                isError = errorMessage != null,
                                 trailingIcon = {
-                                    IconButton(
+                                    androidx.compose.material3.IconButton(
                                         onClick = { showCurrentPassword = !showCurrentPassword },
-                                        icon = if (showCurrentPassword) R.drawable.visibility else R.drawable.visibility_off,
-                                        color = colorPalette.text,
                                         modifier = Modifier.size(24.dp)
-                                    )
-                                }
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = if (showCurrentPassword) R.drawable.visibility else R.drawable.visibility_off),
+                                            contentDescription = if (showCurrentPassword) "Hide password" else "Show password",
+                                            tint = colorPalette.text.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = colorPalette.text,
+                                    unfocusedBorderColor = colorPalette.text.copy(alpha = 0.5f),
+                                    focusedLabelColor = colorPalette.text,
+                                    unfocusedLabelColor = colorPalette.text.copy(alpha = 0.7f),
+                                    unfocusedTextColor = colorPalette.text,
+                                    focusedTextColor = colorPalette.text,
+                                    cursorColor = colorPalette.text
+                                )
                             )
 
                             TextButton(
@@ -318,7 +378,6 @@ fun AccountSettingsScreen() {
                                             return@launch
                                         }
 
-                                        // Reauthenticate user
                                         try {
                                             val credential = EmailAuthProvider.getCredential(userEmail, currentPassword)
                                             Log.d("AccountSettings", "Reauthenticating user with email: $userEmail")
@@ -331,7 +390,6 @@ fun AccountSettingsScreen() {
                                             return@launch
                                         }
 
-                                        // Update email if changed
                                         if (newEmail != originalEmail) {
                                             // Kiểm tra định dạng email
                                             if (!android.util.Patterns.EMAIL_ADDRESS.matcher(newEmail).matches()) {
